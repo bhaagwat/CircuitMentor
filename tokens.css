@@ -141,7 +141,9 @@
   --cm-text-secondary:    var(--text-2);
   --cm-text-tertiary:     var(--text-3);
   --cm-ok:                var(--success);
+  --cm-success:           var(--success);
   --cm-warn:              var(--warning);
+  --cm-warning:           var(--warning);
   --cm-error:             var(--error);
   --cm-error-tint:        var(--error-tint);
   --cm-mentor:            var(--mentor);
@@ -219,6 +221,13 @@
   --input:               var(--cm-line);
   --ring:                var(--cm-blue);
   --radius:              var(--cm-r-sm);
+
+  /* shadcn chart colors — Phase G */
+  --chart-1: #4DA3FF;
+  --chart-2: #0071E3;
+  --chart-3: #7FBBFF;
+  --chart-4: #FFD60A;
+  --chart-5: #8E8E93;
 }
 
 /* ===========================================================================
