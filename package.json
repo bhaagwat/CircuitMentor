@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "pnpm --filter @circuitmentor/web dev",
     "build": "pnpm --filter @circuitmentor/web build",
+    "test": "pnpm --filter @circuitmentor/web test",
     "typecheck": "pnpm --filter @circuitmentor/web tsc --noEmit",
     "lint": "pnpm --filter @circuitmentor/web lint",
     "api:dev": "cd apps/api && uvicorn app.main:app --reload --port 8000",
