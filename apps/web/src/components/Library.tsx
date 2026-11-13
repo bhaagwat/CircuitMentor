@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect } from 'react';
-import { PARTS, type PartDef } from '@/lib/parts';
+import { PARTS } from '@/lib/parts';
 
 interface LibraryProps {
   className?: string;
@@ -14,11 +14,19 @@ export default function Library({ className = '', selectedPart, onSelectPart }: 
   const [search, setSearch] = useState('');
   const [category, setCategory] = useState<string>('All');
   const [viewMode, setViewMode] = useState<'list' | 'gallery'>(() => {
-    return (localStorage.getItem('cm_library_view') as 'list' | 'gallery') || 'list';
+    try {
+      return (localStorage.getItem('cm_library_view') as 'list' | 'gallery') || 'list';
+    } catch {
+      return 'list';
+    }
   });
 
   useEffect(() => {
-    localStorage.setItem('cm_library_view', viewMode);
+    try {
+      localStorage.setItem('cm_library_view', viewMode);
+    } catch {
+      // ignore quota / private browsing errors
+    }
   }, [viewMode]);
 
   const filtered = useMemo(() => {
@@ -134,7 +142,14 @@ export default function Library({ className = '', selectedPart, onSelectPart }: 
                 {part.icon(isSelected ? 'var(--blue)' : 'var(--text-2)')}
               </div>
               <div className="library-tile-info">
-                <span className="library-tile-name">{part.name}</span>
+                <div className="library-tile-title-row">
+                  <span className="library-tile-name">{part.name}</span>
+                  {part.shortcut && (
+                    <kbd className="library-shortcut-badge" title={`Shortcut: ${part.shortcut}`}>
+                      {part.shortcut}
+                    </kbd>
+                  )}
+                </div>
                 <span className="library-tile-meta">
                   {part.category} · {part.pins}p
                 </span>
