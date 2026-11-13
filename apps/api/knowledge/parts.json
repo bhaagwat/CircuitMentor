@@ -1,0 +1,19 @@
+{
+  "resistor.axial": "Passive 2-pin non-polar component. Used for current limiting and voltage division (Ohm's Law: V=IR). Common pitfall: forgetting to put in series with LEDs or transistors to prevent overcurrent destruction.",
+  "led.5mm.red": "Polarized 2-pin diode: pin 0 = anode (+), pin 1 = cathode (-). Forward voltage Vf ~1.8V-2.0V, nominal current 10-20mA. Common pitfall: wiring directly across power rails without a series current-limiting resistor, or reversing polarity.",
+  "battery.9v": "DC power source: pin 0 = VCC (+9V), pin 1 = GND (0V). Powers the circuit rails. Common pitfall: shorting VCC directly to GND, or connecting low-voltage 3.3V/5V ICs directly without regulation.",
+  "battery.3v": "DC coin cell power source: pin 0 = VCC (+3V), pin 1 = GND (0V). Ideal for low-voltage microcontrollers and single LEDs. Common pitfall: direct VCC to GND short.",
+  "ground": "Circuit common reference node (0V): 1 pin (GND). All return currents flow back to ground. Common pitfall: missing ground return path, leaving circuit unclosed.",
+  "pushbutton": "Momentary mechanical tactile switch: 2 pins (passive). Closes circuit while pressed. Common pitfall: floating MCU digital inputs when released (requires pull-up or pull-down resistor).",
+  "switch.spst": "Single Pole Single Throw toggle switch: 2 pins. Connects or disconnects a path. Common pitfall: connecting across VCC and GND directly, causing a short circuit when closed.",
+  "potentiometer": "Variable resistor: 3 pins (pin 0 = terminal 1, pin 1 = wiper, pin 2 = terminal 2). Acts as an adjustable voltage divider. Common pitfall: connecting wiper directly to power rails without load resistance.",
+  "capacitor.ceramic": "Passive 2-pin decoupling/filtering capacitor (non-polarized). Absorbs voltage spikes and smooths rails. Common pitfall: placing in series with DC signals where continuous DC flow is expected.",
+  "diode.1n4007": "Rectifier diode: pin 0 = anode (+), pin 1 = cathode (-). Conducts in forward direction (Vf ~0.7V), blocks reverse. Common pitfall: reversing anode and cathode or exceeding reverse breakdown voltage.",
+  "transistor.npn": "NPN Bipolar Junction Transistor: 3 pins (pin 0 = collector, pin 1 = base, pin 2 = emitter). Controls collector-emitter current via base current (Ic = beta * Ib). Common pitfall: omitting base current-limiting resistor.",
+  "arduino.uno": "ATmega328P microcontroller board: pins 5V (vcc), 3.3V (vcc), GND (gnd), digital I/O D0-D13, analog inputs A0-A5. Common pitfall: drawing >40mA from GPIO pins or connecting pins to >5V signals.",
+  "breadboard.small": "Prototyping breadboard with terminal strips and power rails. Facilitates wire junctions without soldering. Common pitfall: confusing row connections with column power bus rails.",
+  "motor.dc": "DC brushed motor: 2 pins (vcc/gnd reversible for direction). Draws significant stall current and generates inductive back-EMF. Common pitfall: driving directly from MCU pins without flyback diode and transistor driver.",
+  "servo": "Hobby servo motor: 3 pins (pin 0 = GND, pin 1 = VCC 5V, pin 2 = PWM signal). Requires steady 5V supply and 50Hz PWM signal. Common pitfall: powering from MCU 5V pin causing brownouts due to high servo stall currents.",
+  "sensor.ultrasonic": "HC-SR04 ultrasonic distance sensor: 4 pins (VCC 5V, GND, Trig input, Echo output). Emits 40kHz ultrasound pulses. Common pitfall: connecting Echo (5V) to 3.3V MCU inputs without level shifting."
+}
+
