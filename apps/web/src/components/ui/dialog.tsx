@@ -87,15 +87,19 @@ DialogOverlay.displayName = 'DialogOverlay';
 
 export interface DialogContentProps extends React.HTMLAttributes<HTMLDivElement> {
   hideCloseButton?: boolean;
+  overlayClassName?: string;
 }
 
 export const DialogContent = React.forwardRef<HTMLDivElement, DialogContentProps>(
-  ({ className, hideCloseButton = false, children, ...props }, ref) => {
+  ({ className, hideCloseButton = false, overlayClassName, children, ...props }, ref) => {
     const { open, setOpen } = React.useContext(DialogContext);
     if (!open) return null;
 
     return (
-      <div className="cm-dialog-overlay">
+      <div
+        className={cn('cm-dialog-overlay', overlayClassName)}
+        onClick={() => setOpen(false)}
+      >
         <div
           ref={ref}
           role="dialog"

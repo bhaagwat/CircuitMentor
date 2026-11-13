@@ -102,11 +102,10 @@ const sheetVariants = cva(
   }
 );
 
-export interface SheetContentProps
-  extends React.HTMLAttributes<HTMLDivElement>,
-    VariantProps<typeof sheetVariants> {
-  side?: 'top' | 'bottom' | 'left' | 'right';
-}
+export type SheetContentProps = React.HTMLAttributes<HTMLDivElement> &
+  VariantProps<typeof sheetVariants> & {
+    side?: 'top' | 'bottom' | 'left' | 'right';
+  };
 
 export const SheetContent = React.forwardRef<HTMLDivElement, SheetContentProps>(
   ({ side = 'right', className, children, ...props }, ref) => {

@@ -37,6 +37,8 @@ export const Command = React.forwardRef<HTMLDivElement, CommandProps>(
     const [activeValue, setActiveValue] = React.useState<string | null>(null);
     const [visibleItems, setVisibleItems] = React.useState<string[]>([]);
     const itemCallbacksRef = React.useRef(new Map<string, () => void>());
+    const registeredItemsRef = React.useRef(new Set<string>());
+    const pendingUpdateRef = React.useRef<number | null>(null);
 
     const matchesSearch = React.useCallback(
       (val?: string) => {
@@ -50,12 +52,21 @@ export const Command = React.forwardRef<HTMLDivElement, CommandProps>(
     );
 
     const registerItem = React.useCallback((val: string) => {
-      setVisibleItems((prev) => {
-        if (prev.includes(val)) return prev;
-        return [...prev, val];
-      });
+      registeredItemsRef.current.add(val);
+      if (pendingUpdateRef.current === null) {
+        pendingUpdateRef.current = requestAnimationFrame(() => {
+          pendingUpdateRef.current = null;
+          setVisibleItems(Array.from(registeredItemsRef.current));
+        });
+      }
       return () => {
-        setVisibleItems((prev) => prev.filter((item) => item !== val));
+        registeredItemsRef.current.delete(val);
+        if (pendingUpdateRef.current === null) {
+          pendingUpdateRef.current = requestAnimationFrame(() => {
+            pendingUpdateRef.current = null;
+            setVisibleItems(Array.from(registeredItemsRef.current));
+          });
+        }
       };
     }, []);
 
@@ -145,7 +156,11 @@ export interface CommandDialogProps {
 export const CommandDialog = ({ children, open, onOpenChange }: CommandDialogProps) => {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="cm-command-dialog" hideCloseButton={true}>
+      <DialogContent
+        className="cm-command-dialog"
+        overlayClassName="cm-command-dialog-overlay"
+        hideCloseButton={true}
+      >
         <Command>{children}</Command>
       </DialogContent>
     </Dialog>
@@ -259,7 +274,7 @@ export const CommandSeparator = React.forwardRef<HTMLDivElement, React.HTMLAttri
 );
 CommandSeparator.displayName = 'CommandSeparator';
 
-export interface CommandItemProps extends React.HTMLAttributes<HTMLDivElement> {
+export interface CommandItemProps extends Omit<React.HTMLAttributes<HTMLDivElement>, 'onSelect'> {
   value?: string;
   onSelect?: (value: string) => void;
   disabled?: boolean;
@@ -302,7 +317,7 @@ export const CommandItem = React.forwardRef<HTMLDivElement, CommandItemProps>(
           onSelect?.(valKey);
         }}
         onMouseEnter={() => {
-          if (!disabled) setActiveValue(valKey);
+          if (!disabled && activeValue !== valKey) setActiveValue(valKey);
         }}
         {...props}
       >
