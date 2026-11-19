@@ -1,4 +1,4 @@
-"""Alembic env.py for async migrations."""
+"""Alembic env.py for async migrations with SQLite fallback and NullPool."""
 
 from __future__ import annotations
 
@@ -7,8 +7,9 @@ from logging.config import fileConfig
 
 from alembic import context
 from sqlalchemy.ext.asyncio import create_async_engine
+from sqlalchemy.pool import NullPool
 
-from app.config import settings
+from app.db import db_url
 from app.models import Base
 
 config = context.config
@@ -19,20 +20,36 @@ target_metadata = Base.metadata
 
 
 def run_migrations_offline() -> None:
-    url = settings.DATABASE_URL
-    context.configure(url=url, target_metadata=target_metadata, literal_binds=True)
+    context.configure(
+        url=db_url,
+        target_metadata=target_metadata,
+        literal_binds=True,
+        render_as_batch="sqlite" in db_url,
+    )
     with context.begin_transaction():
         context.run_migrations()
 
 
 def do_run_migrations(connection):
-    context.configure(connection=connection, target_metadata=target_metadata)
+    context.configure(
+        connection=connection,
+        target_metadata=target_metadata,
+        render_as_batch=connection.dialect.name == "sqlite",
+    )
     with context.begin_transaction():
         context.run_migrations()
 
 
 async def run_async_migrations() -> None:
-    engine = create_async_engine(settings.DATABASE_URL)
+    connect_args = {}
+    if "sqlite" in db_url:
+        connect_args["check_same_thread"] = False
+
+    engine = create_async_engine(
+        db_url,
+        poolclass=NullPool,
+        connect_args=connect_args,
+    )
     async with engine.connect() as connection:
         await connection.run_sync(do_run_migrations)
     await engine.dispose()
