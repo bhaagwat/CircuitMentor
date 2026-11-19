@@ -2,6 +2,7 @@
 
 import logging
 import socket
+from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.config import settings
@@ -67,6 +68,9 @@ async def get_db():
         try:
             yield session
             await session.commit()
+        except HTTPException:
+            await session.rollback()
+            raise
         except Exception:
             await session.rollback()
             raise

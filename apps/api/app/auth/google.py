@@ -25,6 +25,13 @@ router = APIRouter(prefix="/v1/auth/google", tags=["auth"])
 AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 TOKEN_URL = "https://oauth2.googleapis.com/token"
 
+ALLOWED_RETURN_ORIGINS = {
+    "http://localhost:5173",
+    "http://localhost:5174",
+    "http://localhost:3000",
+    settings.web_url.rstrip("/"),
+}
+
 
 def _b64(b: bytes) -> str:
     return base64.urlsafe_b64encode(b).rstrip(b"=").decode()
@@ -39,13 +46,13 @@ async def login(request: Request):
     state = _b64(secrets.token_bytes(32))
     verifier = _b64(secrets.token_bytes(32))
 
-    # Preserve originating frontend port (e.g. 5173, 5174)
+    # Allowlisted return origin selection
     referer = request.headers.get("referer") or ""
     origin_web_url = settings.web_url
-    if "5174" in referer:
-        origin_web_url = "http://localhost:5174"
-    elif "5173" in referer:
-        origin_web_url = "http://localhost:5173"
+    for allowed in ALLOWED_RETURN_ORIGINS:
+        if referer.startswith(allowed):
+            origin_web_url = allowed
+            break
 
     params = {
         "client_id": settings.google_client_id,
@@ -120,7 +127,9 @@ async def callback(
     await db.refresh(user)
 
     return_url = request.cookies.get("oauth_return_url") or settings.web_url
-    resp = RedirectResponse(f"{return_url}/dashboard")
+    if return_url not in ALLOWED_RETURN_ORIGINS:
+        return_url = settings.web_url
+    resp = RedirectResponse(f"{return_url.rstrip('/')}/dashboard")
     cookie_opts = _get_cookie_opts()
     resp.set_cookie("cm_token", create_access_token(str(user.id)), max_age=7 * 86400, **cookie_opts)
     resp.delete_cookie("oauth_state", path="/")

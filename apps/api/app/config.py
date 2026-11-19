@@ -1,5 +1,6 @@
 """CircuitMentor API — configuration via environment variables."""
 
+import warnings
 from pydantic_settings import BaseSettings
 
 
@@ -40,3 +41,13 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+if settings.JWT_SECRET == "change-me-to-a-random-secret-in-production":
+    if settings.cookie_secure:
+        raise ValueError(
+            "CRITICAL: JWT_SECRET must be changed from the default in production (cookie_secure=True)."
+        )
+    warnings.warn(
+        "JWT_SECRET is using the insecure default value. Set a strong secret in .env before deploying to production.",
+        stacklevel=2,
+    )
