@@ -14,6 +14,7 @@ from app.db import engine
 from app.routers.parts import router as parts_router
 from app.routers.projects import router as projects_router
 from app.routers.mentor import router as mentor_router
+from app.routers.messages import router as messages_router
 
 
 @asynccontextmanager
@@ -52,6 +53,7 @@ app.include_router(auth_router)
 app.include_router(projects_router)
 app.include_router(parts_router)
 app.include_router(mentor_router)
+app.include_router(messages_router)
 
 
 @app.get("/health", tags=["system"])

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -149,6 +150,7 @@ async def update_project(
     for key, value in update_data.items():
         setattr(project, key, value)
 
+    project.updated_at = datetime.now(timezone.utc)
     await db.flush()
     return project
 
