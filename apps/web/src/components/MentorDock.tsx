@@ -10,6 +10,7 @@ import type {
 
 export interface MentorDockProps {
   selectedComponent: PlacedComponent | null;
+  selectedCount?: number;
   components: PlacedComponent[];
   wires: WireConnection[];
   findings: ErcFindingWithHints[];
@@ -19,6 +20,8 @@ export interface MentorDockProps {
   activeUnlockedLevel: 1 | 2 | 3 | 4;
   isStreaming: boolean;
   streamError: string | null;
+  includeCircuitContext?: boolean;
+  onToggleCircuitContext?: () => void;
   messages: MentorMessage[];
   onWhatsWrong: () => void;
   onHint: () => void;
@@ -38,6 +41,7 @@ const HINT_LEVEL_META: Record<number, string> = {
 
 export default function MentorDock({
   selectedComponent,
+  selectedCount = selectedComponent ? 1 : 0,
   components,
   wires,
   findings,
@@ -47,6 +51,8 @@ export default function MentorDock({
   activeUnlockedLevel,
   isStreaming,
   streamError,
+  includeCircuitContext = true,
+  onToggleCircuitContext,
   messages,
   onWhatsWrong,
   onHint,
@@ -285,26 +291,61 @@ export default function MentorDock({
         )}
 
         {conceptOpen && (
-          <form className="mentor-input-wrapper" onSubmit={handleSendConcept}>
-            <input
-              className="mentor-input"
-              placeholder="Ask about Ohm's law, LED polarity, decoupling..."
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              disabled={isStreaming}
-              aria-label="Ask a concept question"
-            />
-            <button
-              type="submit"
-              className="mentor-send"
-              disabled={isStreaming || !input.trim()}
-              aria-label="Send message"
-            >
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M2 21l21-9L2 3v7l15 2-15 2z" />
-              </svg>
-            </button>
-          </form>
+          <div className="mentor-chat-compose">
+            <div className="mentor-attach-row">
+              <button
+                type="button"
+                className={`context-chip context-chip-btn mentor-attach-chip ${
+                  includeCircuitContext ? 'is-attached' : 'is-detached'
+                }`}
+                onClick={onToggleCircuitContext}
+                title={
+                  includeCircuitContext
+                    ? 'Live circuit state attached — click to detach'
+                    : 'Circuit state detached — click to attach'
+                }
+                aria-pressed={includeCircuitContext}
+              >
+                <span
+                  className="context-chip-dot"
+                  style={
+                    includeCircuitContext
+                      ? { background: 'var(--mentor)' }
+                      : { background: 'var(--text-3)' }
+                  }
+                />
+                {includeCircuitContext ? (
+                  <span>
+                    Context: {activeCompCount}{' '}
+                    {activeCompCount === 1 ? 'component' : 'components'}
+                    {selectedCount > 0 ? ` · ${selectedCount} selected` : ''}
+                  </span>
+                ) : (
+                  <span>Context: detached (click to attach)</span>
+                )}
+              </button>
+            </div>
+            <form className="mentor-input-wrapper" onSubmit={handleSendConcept}>
+              <input
+                className="mentor-input"
+                placeholder="Ask about Ohm's law, LED polarity, decoupling..."
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                disabled={isStreaming}
+                aria-label="Ask a concept question"
+              />
+              <button
+                type="submit"
+                className="mentor-send"
+                disabled={isStreaming || !input.trim()}
+                aria-label="Send message"
+              >
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M2 21l21-9L2 3v7l15 2-15 2z" />
+                </svg>
+              </button>
+            </form>
+          </div>
         )}
       </div>
     </div>

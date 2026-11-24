@@ -1,6 +1,10 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import type { ErcFindingWithHints, Hint } from '../erc/types';
+import type { PlacedComponent } from '../../App';
+import type { WireConnection } from '../../components/Canvas';
+import type { SimulationResult } from '../sim/dcSim';
 import { api } from '../api';
+import { buildCircuitContext } from './buildCircuitContext';
 
 export interface FindingHintState {
   findingId: string;
@@ -139,6 +143,19 @@ const INITIAL_MESSAGE: MentorMessage = {
   text: 'Welcome to CircuitMentor! Pick "What\'s wrong?" to inspect an issue, "Hint" for step-by-step visual guidance on the canvas, or "Explain concept" to ask a question.',
 };
 
+export interface MentorCircuitInput {
+  projectName: string;
+  task?: { title: string; goal: string } | null;
+  components: PlacedComponent[];
+  wires: WireConnection[];
+  selectedComponentIds: string[];
+  selectedConnectionIds: string[];
+  simulation?: {
+    running: boolean;
+    result?: SimulationResult | null;
+  };
+}
+
 export interface UseMentorReturn {
   messages: MentorMessage[];
   activeHint: ActiveHint | null;
@@ -148,6 +165,8 @@ export interface UseMentorReturn {
   findingStates: Map<string, FindingHintState>;
   isStreaming: boolean;
   streamError: string | null;
+  includeCircuitContext: boolean;
+  toggleCircuitContext: () => void;
   handleWhatsWrong: () => void;
   handleHint: () => void;
   handleConceptQuestion: (question: string) => Promise<void>;
@@ -160,7 +179,7 @@ export function useMentor(
   projectId: string,
   findings: ErcFindingWithHints[],
   circuitChangeCount: number,
-  circuitContext: { components: unknown[]; wires: unknown[] },
+  circuitInput: MentorCircuitInput,
   selectedComponentId?: string | null
 ): UseMentorReturn {
   const [messages, setMessages] = useState<MentorMessage[]>([INITIAL_MESSAGE]);
@@ -172,6 +191,11 @@ export function useMentor(
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamError, setStreamError] = useState<string | null>(null);
   const [lastConceptQuestion, setLastConceptQuestion] = useState('');
+  const [includeCircuitContext, setIncludeCircuitContext] = useState(true);
+
+  const toggleCircuitContext = useCallback(() => {
+    setIncludeCircuitContext((prev) => !prev);
+  }, []);
 
   const prevProjectIdRef = useRef(projectId);
   const prevFindingsRef = useRef<Map<string, ErcFindingWithHints>>(
@@ -488,16 +512,46 @@ export function useMentor(
 
       let fullAssistantText = '';
       try {
+        // Capture fresh live canvas state right at send time (including unsaved edits & selection)
+        const liveCircuitPayload = includeCircuitContext
+          ? buildCircuitContext({
+              project: {
+                id: activeProjId,
+                name: circuitInput.projectName,
+                task: circuitInput.task ?? null,
+              },
+              components: circuitInput.components,
+              wires: circuitInput.wires,
+              selection: {
+                componentIds: circuitInput.selectedComponentIds,
+                connectionIds: circuitInput.selectedConnectionIds,
+              },
+              findings,
+              simulation: circuitInput.simulation,
+            })
+          : null;
+
+        const history = messages
+          .filter((m) => m.id !== 'welcome' && !m.isError && m.text.trim().length > 0)
+          .slice(-8)
+          .map((m) => ({
+            role: m.role === 'student' ? 'user' : 'assistant',
+            content: m.text.slice(0, 1000),
+          }));
+
         const response = await fetch('/v1/mentor/stream', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'include',
           body: JSON.stringify({
             message: trimmed,
+            history,
             hint_level: 1,
             mode: 'concept',
-            circuit: circuitContext,
-            findings: findings.map(({ hints: _hints, ...rest }) => rest),
+            circuit: liveCircuitPayload,
+            findings: includeCircuitContext
+              ? findings.map(({ hints: _hints, ...rest }) => rest)
+              : [],
           }),
         });
 
@@ -590,7 +644,7 @@ export function useMentor(
         setIsStreaming(false);
       }
     },
-    [isStreaming, circuitContext, findings]
+    [isStreaming, projectId, circuitInput, findings, messages, includeCircuitContext]
   );
 
   const handleRetryConcept = useCallback(() => {
@@ -613,6 +667,8 @@ export function useMentor(
     findingStates,
     isStreaming,
     streamError,
+    includeCircuitContext,
+    toggleCircuitContext,
     handleWhatsWrong,
     handleHint,
     handleConceptQuestion,

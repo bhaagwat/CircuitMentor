@@ -27,6 +27,7 @@ from app.routers.messages import router as messages_router
 _RATE_LIMIT_BUCKETS: dict[str, list[float]] = defaultdict(list)
 _RATE_LIMITS: dict[str, tuple[int, int]] = {
     "/v1/mentor/stream": (30, 60),  # 30 requests per 60 seconds
+    "/v1/mentor/chat": (30, 60),    # 30 requests per 60 seconds
     "/v1/auth/login": (15, 60),     # 15 attempts per 60 seconds
     "/v1/auth/register": (10, 60),  # 10 attempts per 60 seconds
 }

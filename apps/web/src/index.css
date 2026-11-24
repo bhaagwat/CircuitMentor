@@ -2012,6 +2012,29 @@ button:focus, button:focus-visible,
   background: var(--panel);
 }
 
+.mentor-chat-compose {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.mentor-attach-row {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+}
+
+.mentor-attach-chip.is-attached {
+  border-color: rgba(100, 210, 255, 0.32);
+  background: rgba(100, 210, 255, 0.08);
+  color: #D9F2FF;
+}
+
+.mentor-attach-chip.is-detached {
+  opacity: 0.72;
+  color: var(--text-2);
+}
+
 .mentor-input-wrapper {
   display: flex;
   gap: 8px;

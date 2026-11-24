@@ -351,12 +351,38 @@ export default function App({ initialScreen }: AppProps = {}) {
     return currentProject.components.find((c) => c.id === selectedIds[0]) || null;
   }, [currentProject.components, selectedIds]);
 
+  const currentTask = useMemo(() => {
+    return currentProject.taskId ? getTaskById(currentProject.taskId) : null;
+  }, [currentProject.taskId]);
+
+  const simResult = useMemo(() => {
+    if (!isSimulating) return null;
+    return runDcSimulation(currentProject.components, currentProject.wires);
+  }, [isSimulating, currentProject.components, currentProject.wires]);
+
   const circuitContext = useMemo(
     () => ({
+      projectName: currentProject.name,
+      task: currentTask ? { title: currentTask.title, goal: currentTask.goal } : null,
       components: currentProject.components,
       wires: currentProject.wires,
+      selectedComponentIds: selectedIds,
+      selectedConnectionIds: selectedWireId ? [selectedWireId] : [],
+      simulation: {
+        running: isSimulating,
+        result: simResult,
+      },
     }),
-    [currentProject.components, currentProject.wires]
+    [
+      currentProject.name,
+      currentTask,
+      currentProject.components,
+      currentProject.wires,
+      selectedIds,
+      selectedWireId,
+      isSimulating,
+      simResult,
+    ]
   );
 
   const mentor = useMentor(
@@ -366,15 +392,6 @@ export default function App({ initialScreen }: AppProps = {}) {
     circuitContext,
     selectedComponent?.id ?? null
   );
-
-  const currentTask = useMemo(() => {
-    return currentProject.taskId ? getTaskById(currentProject.taskId) : null;
-  }, [currentProject.taskId]);
-
-  const simResult = useMemo(() => {
-    if (!isSimulating) return null;
-    return runDcSimulation(currentProject.components, currentProject.wires);
-  }, [isSimulating, currentProject.components, currentProject.wires]);
 
   // Evaluate task milestones whenever circuit topology changes in a task-associated project
   useEffect(() => {
@@ -1934,6 +1951,7 @@ export default function App({ initialScreen }: AppProps = {}) {
                   <MentorDock
                     key={currentProject.id}
                     selectedComponent={selectedComponent}
+                    selectedCount={selectedIds.length}
                     components={currentProject.components}
                     wires={currentProject.wires}
                     findings={currentProject.findings}
@@ -1943,6 +1961,8 @@ export default function App({ initialScreen }: AppProps = {}) {
                     activeUnlockedLevel={mentor.activeUnlockedLevel}
                     isStreaming={mentor.isStreaming}
                     streamError={mentor.streamError}
+                    includeCircuitContext={mentor.includeCircuitContext}
+                    onToggleCircuitContext={mentor.toggleCircuitContext}
                     messages={mentor.messages}
                     onWhatsWrong={mentor.handleWhatsWrong}
                     onHint={handleHintWithProgress}
