@@ -77,3 +77,11 @@ async def login(response: Response, body: UserLogin, db: AsyncSession = Depends(
 async def me(current_user: User = Depends(get_current_user)):
     """Return the authenticated user's profile."""
     return current_user
+
+
+@router.post("/refresh", response_model=TokenResponse)
+async def refresh_token(response: Response, current_user: User = Depends(get_current_user)):
+    """Generate a new access token for the authenticated user and renew the auth cookie."""
+    token = create_access_token(current_user.id)
+    _set_auth_cookie(response, token)
+    return TokenResponse(access_token=token)

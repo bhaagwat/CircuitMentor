@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     google_redirect_uri: str = "http://localhost:5173/v1/auth/google/callback"
     web_url: str = "http://localhost:5173"
     cookie_secure: bool = False
+    rate_limit_enabled: bool = True
 
     # AI Mentor (OpenRouter / Anthropic)
     openrouter_api_key: str = ""

@@ -20,8 +20,36 @@ export interface UserProfile {
   email: string;
   display_name: string | null;
   avatar_url: string | null;
-  google_sub: string | null;
   created_at: string;
+}
+
+export interface ChatMessage {
+  id: string;
+  project_id: string;
+  user_id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  hint_level?: number | null;
+  mode?: string | null;
+  created_at: string;
+}
+
+export interface Part {
+  id: string;
+  part_id: string;
+  name: string;
+  category: string;
+  description?: string | null;
+  symbol_svg?: string | null;
+  params_schema?: Record<string, unknown> | null;
+  pins?: Record<string, unknown> | null;
+}
+
+export interface PaginatedParts {
+  items: Part[];
+  total: number;
+  page: number;
+  page_size: number;
 }
 
 export interface ProjectProgress {
@@ -204,6 +232,37 @@ export const api = {
     return request<void>(`/v1/projects/${projectId}`, {
       method: 'DELETE',
     });
+  },
+
+  // Chat messages
+  async listMessages(projectId: string): Promise<ChatMessage[]> {
+    return request<ChatMessage[]>(`/v1/projects/${projectId}/messages`);
+  },
+
+  async postMessage(
+    projectId: string,
+    data: { role: 'user' | 'assistant'; content: string; hint_level?: number; mode?: string }
+  ): Promise<ChatMessage> {
+    return request<ChatMessage>(`/v1/projects/${projectId}/messages`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
+
+  // Parts
+  async listParts(opts?: {
+    q?: string;
+    category?: string;
+    page?: number;
+    page_size?: number;
+  }): Promise<PaginatedParts> {
+    const params = new URLSearchParams();
+    if (opts?.q) params.set('q', opts.q);
+    if (opts?.category) params.set('category', opts.category);
+    if (opts?.page) params.set('page', String(opts.page));
+    if (opts?.page_size) params.set('page_size', String(opts.page_size));
+    const qs = params.toString();
+    return request<PaginatedParts>(`/v1/parts${qs ? '?' + qs : ''}`);
   },
 };
 
