@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import type { ErcFindingWithHints, Hint } from '../erc/types';
+import { api } from '../api';
 
 export interface FindingHintState {
   findingId: string;
@@ -173,15 +174,20 @@ export function useMentor(
   const [lastConceptQuestion, setLastConceptQuestion] = useState('');
 
   const prevProjectIdRef = useRef(projectId);
-  const prevFindingsRef = useRef<Map<string, ErcFindingWithHints>>(new Map());
+  const prevFindingsRef = useRef<Map<string, ErcFindingWithHints>>(
+    new Map(findings.map((f) => [f.id, f]))
+  );
   const prevChangeCountRef = useRef(circuitChangeCount);
+  const skipNextFindingDiffRef = useRef(false);
 
-  // Reset per-finding state and overlays when switching projects
+  // Reset per-finding state, overlays, and load project-scoped chat history when switching projects
   useEffect(() => {
     if (prevProjectIdRef.current !== projectId) {
       prevProjectIdRef.current = projectId;
       prevChangeCountRef.current = circuitChangeCount;
       prevFindingsRef.current = new Map(findings.map((f) => [f.id, f]));
+      skipNextFindingDiffRef.current = true;
+
       setFindingStates(
         new Map(
           findings.map((f) => [
@@ -193,9 +199,44 @@ export function useMentor(
       setActiveHint(null);
       setPreferredFindingId(null);
       setStreamError(null);
+      setLastConceptQuestion('');
       setMessages([INITIAL_MESSAGE]);
     }
-  }, [projectId, findings, circuitChangeCount]);
+
+    // Load persisted chat messages for backend UUID projects
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+      projectId
+    );
+    if (!isUuid) return;
+
+    let cancelled = false;
+    api
+      .listMessages(projectId)
+      .then((history) => {
+        if (cancelled || prevProjectIdRef.current !== projectId) return;
+        if (history.length > 0) {
+          const mapped: MentorMessage[] = history.map((m) => ({
+            id: m.id,
+            role: m.role === 'user' ? 'student' : 'assistant',
+            text: m.content,
+            hintLevel:
+              m.hint_level && m.hint_level >= 1 && m.hint_level <= 4
+                ? (m.hint_level as 1 | 2 | 3 | 4)
+                : undefined,
+          }));
+          setMessages([INITIAL_MESSAGE, ...mapped]);
+        } else {
+          setMessages([INITIAL_MESSAGE]);
+        }
+      })
+      .catch(() => {
+        // Keep clean initial message if history fetch fails
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId]);
 
   // Increment changesWhilePersisted for findings that existed before this edit
   useEffect(() => {
@@ -225,6 +266,11 @@ export function useMentor(
   // Sync finding states: detect cleared findings (success loop) & register new ones
   useEffect(() => {
     if (prevProjectIdRef.current !== projectId) return;
+    if (skipNextFindingDiffRef.current) {
+      skipNextFindingDiffRef.current = false;
+      prevFindingsRef.current = new Map(findings.map((f) => [f.id, f]));
+      return;
+    }
 
     const currentMap = new Map(findings.map((f) => [f.id, f]));
     const prevMap = prevFindingsRef.current;
@@ -425,6 +471,14 @@ export function useMentor(
       setLastConceptQuestion(trimmed);
       setIsStreaming(true);
 
+      const activeProjId = projectId;
+      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+        activeProjId
+      );
+      if (isUuid) {
+        api.postMessage(activeProjId, { role: 'user', content: trimmed, mode: 'concept' }).catch(() => {});
+      }
+
       const assistantMsgId = `a_${Date.now()}`;
       setMessages((prev) => [
         ...prev,
@@ -432,6 +486,7 @@ export function useMentor(
         { id: assistantMsgId, role: 'assistant', text: '' },
       ]);
 
+      let fullAssistantText = '';
       try {
         const response = await fetch('/v1/mentor/stream', {
           method: 'POST',
@@ -468,6 +523,7 @@ export function useMentor(
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
+          if (prevProjectIdRef.current !== activeProjId) break;
 
           buffer += decoder.decode(value, { stream: true });
           const blocks = buffer.split('\n\n');
@@ -495,6 +551,7 @@ export function useMentor(
                       )
                     );
                   } else if (parsed.t) {
+                    fullAssistantText += parsed.t;
                     setMessages((prev) =>
                       prev.map((m) =>
                         m.id === assistantMsgId
@@ -509,6 +566,16 @@ export function useMentor(
               }
             }
           }
+        }
+
+        if (isUuid && fullAssistantText.trim()) {
+          api
+            .postMessage(activeProjId, {
+              role: 'assistant',
+              content: fullAssistantText,
+              mode: 'concept',
+            })
+            .catch(() => {});
         }
       } catch (err: unknown) {
         const msg =

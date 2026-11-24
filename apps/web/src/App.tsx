@@ -585,7 +585,7 @@ export default function App({ initialScreen }: AppProps = {}) {
     return () => {
       active = false;
     };
-  }, [isAuthenticated, activeProjectId]);
+  }, [isAuthenticated]);
 
   // Auth Handlers
   const handleLogout = useCallback(() => {
@@ -1932,6 +1932,7 @@ export default function App({ initialScreen }: AppProps = {}) {
                   )}
 
                   <MentorDock
+                    key={currentProject.id}
                     selectedComponent={selectedComponent}
                     components={currentProject.components}
                     wires={currentProject.wires}
