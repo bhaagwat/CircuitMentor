@@ -3,7 +3,7 @@
   "framework": "vite",
   "buildCommand": "cd ../.. && pnpm --filter @circuitmentor/web build",
   "outputDirectory": "dist",
-  "installCommand": "cd ../.. && pnpm install --frozen-lockfile",
+  "installCommand": "cd ../.. && pnpm install --no-frozen-lockfile",
   "rewrites": [
     {
       "source": "/v1/:path*",

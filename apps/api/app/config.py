@@ -4,7 +4,8 @@ import warnings
 from pathlib import Path
 from pydantic_settings import BaseSettings
 
-_REPO_ROOT = Path(__file__).resolve().parents[3]
+_resolved = Path(__file__).resolve()
+_REPO_ROOT = _resolved.parents[3] if len(_resolved.parents) > 3 else _resolved.parent.parent
 
 
 class Settings(BaseSettings):

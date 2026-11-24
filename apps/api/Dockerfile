@@ -33,9 +33,11 @@ RUN chown -R cmuser:cmgroup /app
 
 USER cmuser
 
+ENV PYTHONPATH=/app
+
 EXPOSE 8000
 
 HEALTHCHECK --interval=15s --timeout=5s --start-period=10s --retries=3 \
   CMD sh -c 'curl -f http://localhost:${PORT:-8000}/health || exit 1'
 
-CMD ["sh", "-c", "alembic upgrade head && exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --workers 2"]
+CMD ["sh", "-c", "python -m alembic upgrade head && exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --workers 2"]
