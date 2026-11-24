@@ -1,9 +1,9 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": "vite",
-  "buildCommand": "cd ../.. && pnpm --filter @circuitmentor/web build",
+  "installCommand": "npm install --legacy-peer-deps --no-audit --no-fund",
+  "buildCommand": "npm run build",
   "outputDirectory": "dist",
-  "installCommand": "cd ../.. && pnpm install --no-frozen-lockfile",
   "rewrites": [
     {
       "source": "/v1/:path*",
