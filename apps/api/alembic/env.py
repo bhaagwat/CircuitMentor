@@ -44,6 +44,9 @@ async def run_async_migrations() -> None:
     connect_args = {}
     if "sqlite" in db_url:
         connect_args["check_same_thread"] = False
+    elif ":6543" in db_url or "pooler.supabase.com" in db_url:
+        connect_args["statement_cache_size"] = 0
+        connect_args["prepared_statement_cache_size"] = 0
 
     engine = create_async_engine(
         db_url,

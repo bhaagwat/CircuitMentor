@@ -632,8 +632,12 @@ export function useMentor(
             .catch(() => {});
         }
       } catch (err: unknown) {
-        const msg =
+        const raw =
           err instanceof Error ? err.message : 'Mentor is unavailable, try again.';
+        const msg =
+          raw === 'Failed to fetch' || raw.includes('NetworkError')
+            ? 'Cannot reach API server. Make sure the web & API servers are running and retry.'
+            : raw;
         setStreamError(msg);
         setMessages((prev) =>
           prev.map((m) =>

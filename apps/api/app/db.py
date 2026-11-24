@@ -10,7 +10,12 @@ from app.config import settings
 
 logger = logging.getLogger("circuitmentor.db")
 
-db_url = settings.DATABASE_URL
+db_url = settings.DATABASE_URL.strip()
+if db_url.startswith("postgres://"):
+    db_url = "postgresql+asyncpg://" + db_url[len("postgres://"):]
+elif db_url.startswith("postgresql://"):
+    db_url = "postgresql+asyncpg://" + db_url[len("postgresql://"):]
+
 connect_args = {}
 engine_kwargs = {}
 
@@ -24,9 +29,9 @@ if "postgres" in db_url:
     port = 5432
     try:
         if "@" in db_url:
-            host_port = db_url.split("@")[1].split("/")[0]
+            host_port = db_url.split("@", 1)[1].split("/", 1)[0]
             if ":" in host_port:
-                host, port_str = host_port.split(":")
+                host, port_str = host_port.split(":", 1)
                 port = int(port_str)
             else:
                 host = host_port
@@ -37,14 +42,22 @@ if "postgres" in db_url:
         is_postgres_up = False
 
     if is_postgres_up:
-        if ":6543" in db_url:
+        if ":6543" in db_url or "pooler.supabase.com" in db_url:
             connect_args["statement_cache_size"] = 0
+            connect_args["prepared_statement_cache_size"] = 0
         engine_kwargs = {
             "pool_size": 10,
             "max_overflow": 20,
+            "pool_pre_ping": True,
+            "pool_recycle": 300,
             "connect_args": connect_args,
         }
     else:
+        if settings.cookie_secure:
+            raise RuntimeError(
+                f"PostgreSQL on {host}:{port} is unreachable in production mode (cookie_secure=True). "
+                "Hint: On Render/IPv4 hosts, use the Supabase Pooler hostname (aws-0-<region>.pooler.supabase.com) instead of db.<ref>.supabase.co."
+            )
         logger.warning(
             "PostgreSQL on %s:%s is unreachable. Falling back to local SQLite database (%s).",
             host,
