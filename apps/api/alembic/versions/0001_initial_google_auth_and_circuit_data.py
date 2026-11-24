@@ -19,10 +19,14 @@ depends_on = None
 
 
 def upgrade() -> None:
+    uuid_type = sa.Uuid(as_uuid=True).with_variant(postgresql.UUID(as_uuid=True), "postgresql")
+    jsonb_type = postgresql.JSONB(astext_type=sa.Text()).with_variant(sa.JSON(), "sqlite")
+    json_type = postgresql.JSON(astext_type=sa.Text()).with_variant(sa.JSON(), "sqlite")
+
     # ── users table ────────────────────────────────────────────────────────────
     op.create_table(
         'users',
-        sa.Column('id', postgresql.UUID(as_uuid=True), primary_key=True),
+        sa.Column('id', uuid_type, primary_key=True),
         sa.Column('google_sub', sa.String(length=100), nullable=True),
         sa.Column('email', sa.String(length=320), nullable=False),
         sa.Column('hashed_password', sa.String(length=128), nullable=True),
@@ -36,12 +40,12 @@ def upgrade() -> None:
     # ── projects table ─────────────────────────────────────────────────────────
     op.create_table(
         'projects',
-        sa.Column('id', postgresql.UUID(as_uuid=True), primary_key=True),
-        sa.Column('owner_id', postgresql.UUID(as_uuid=True), sa.ForeignKey('users.id', ondelete='CASCADE'), nullable=False),
+        sa.Column('id', uuid_type, primary_key=True),
+        sa.Column('owner_id', uuid_type, sa.ForeignKey('users.id', ondelete='CASCADE'), nullable=False),
         sa.Column('title', sa.String(length=200), nullable=False),
         sa.Column('board_type', sa.String(length=50), nullable=False),
         sa.Column('goal', sa.Text(), nullable=True),
-        sa.Column('circuit_data', postgresql.JSONB(astext_type=sa.Text()), server_default='{}', nullable=False),
+        sa.Column('circuit_data', jsonb_type, server_default='{}', nullable=False),
         sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
         sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
         sa.Column('is_deleted', sa.Boolean(), default=False, nullable=False),
@@ -51,14 +55,14 @@ def upgrade() -> None:
     # ── parts table ────────────────────────────────────────────────────────────
     op.create_table(
         'parts',
-        sa.Column('id', postgresql.UUID(as_uuid=True), primary_key=True),
+        sa.Column('id', uuid_type, primary_key=True),
         sa.Column('part_id', sa.String(length=100), nullable=False),
         sa.Column('name', sa.String(length=200), nullable=False),
         sa.Column('category', sa.String(length=50), nullable=False),
         sa.Column('description', sa.Text(), nullable=True),
         sa.Column('symbol_svg', sa.Text(), nullable=True),
-        sa.Column('params_schema', postgresql.JSON(astext_type=sa.Text()), nullable=True),
-        sa.Column('pins', postgresql.JSON(astext_type=sa.Text()), nullable=True),
+        sa.Column('params_schema', json_type, nullable=True),
+        sa.Column('pins', json_type, nullable=True),
         sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
     )
     op.create_index(op.f('ix_parts_part_id'), 'parts', ['part_id'], unique=True)

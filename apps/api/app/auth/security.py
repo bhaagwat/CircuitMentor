@@ -48,9 +48,12 @@ async def get_current_user(
     db: AsyncSession = Depends(get_db),
 ) -> User:
     """FastAPI dependency: extracts JWT from cm_token cookie or Authorization header."""
-    token: str | None = request.cookies.get("cm_token")
-    if not token and credentials:
+    # Prefer explicit Authorization header over ambient cookie
+    token: str | None = None
+    if credentials and credentials.credentials:
         token = credentials.credentials
+    elif request.cookies.get("cm_token"):
+        token = request.cookies.get("cm_token")
 
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,

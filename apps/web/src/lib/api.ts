@@ -49,24 +49,46 @@ export interface BackendProject {
   updated_at: string;
 }
 
+const API_BASE = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '');
+
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
+  const url = path.startsWith('http') ? path : `${API_BASE}${path}`;
   const headers = new Headers(options.headers || {});
   if (options.body && !(options.body instanceof FormData) && !headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json');
   }
 
-  const response = await fetch(path, {
-    ...options,
-    headers,
-    credentials: 'include',
-  });
+  const execute = async () => {
+    try {
+      return await fetch(url, {
+        ...options,
+        headers,
+        credentials: 'include',
+      });
+    } catch (networkErr: any) {
+      throw new ApiError(0, `Network error: ${networkErr.message || 'Failed to reach API server'}`);
+    }
+  };
+
+  let response: Response;
+  try {
+    response = await execute();
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 0) {
+      // Retry once after 500ms backoff
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      response = await execute();
+    } else {
+      throw err;
+    }
+  }
 
   if (response.status === 204) {
     return {} as T;
   }
 
   if (response.status === 401) {
-    let errMessage = 'Unauthorized';
+    let errMessage = 'Session expired. Please log in again.';
     try {
       const errJson = await response.json();
       errMessage = errJson.detail || errMessage;
@@ -74,6 +96,36 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
       // no JSON body
     }
     throw new ApiError(401, errMessage);
+  }
+
+  if (response.status === 413) {
+    throw new ApiError(413, 'Circuit payload is too large to save.');
+  }
+
+  if (response.status === 422) {
+    let errMessage = 'Invalid circuit format';
+    try {
+      const errJson = await response.json();
+      if (Array.isArray(errJson.detail)) {
+        errMessage = errJson.detail.map((d: any) => d.msg || JSON.stringify(d)).join(', ');
+      } else if (errJson.detail) {
+        errMessage = String(errJson.detail);
+      }
+    } catch {
+      // no JSON body
+    }
+    throw new ApiError(422, `Validation failed: ${errMessage}`);
+  }
+
+  if (response.status >= 500) {
+    let errMessage = 'Internal server error while saving';
+    try {
+      const errJson = await response.json();
+      errMessage = errJson.detail || errMessage;
+    } catch {
+      // no JSON body
+    }
+    throw new ApiError(response.status, `Server error (${response.status}): ${errMessage}`);
   }
 
   if (!response.ok) {

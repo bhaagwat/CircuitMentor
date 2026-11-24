@@ -19,7 +19,7 @@ import SettingsModal, {
 import { isInputElement } from './lib/shortcuts';
 import { getPartMeta } from './lib/parts';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from './components/ui/tabs';
-import { api, type BackendProject, type UserProfile, type ProjectProgress } from './lib/api';
+import { api, ApiError, type BackendProject, type UserProfile, type ProjectProgress } from './lib/api';
 import { evaluateErc } from './lib/erc/rules';
 import type { ErcFindingWithHints } from './lib/erc/types';
 import { useMentor } from './lib/mentor/useMentor';
@@ -1304,9 +1304,13 @@ export default function App({ initialScreen }: AppProps = {}) {
         setSaveToast('Saved');
         setTimeout(() => setSaveToast(null), 1500);
       } catch (err: any) {
-        setSaveError(err.message || 'Auto-save failed');
-        setSaveToast(`Save failed: ${err.message || 'Error'}`);
-        setTimeout(() => setSaveToast(null), 3000);
+        const errorMsg = err instanceof ApiError ? err.message : (err?.message || 'Auto-save failed');
+        setSaveError(errorMsg);
+        setSaveToast(`Save failed: ${errorMsg}`);
+        if (err instanceof ApiError && err.status === 401) {
+          setIsAuthenticated(false);
+        }
+        setTimeout(() => setSaveToast(null), 3500);
       } finally {
         setIsSaving(false);
       }

@@ -19,9 +19,10 @@ depends_on = None
 
 
 def upgrade() -> None:
+    jsonb_type = postgresql.JSONB(astext_type=sa.Text()).with_variant(sa.JSON(), "sqlite")
     op.add_column('projects', sa.Column('task_id', sa.String(length=100), nullable=True))
     op.create_index(op.f('ix_projects_task_id'), 'projects', ['task_id'], unique=False)
-    op.add_column('projects', sa.Column('progress', postgresql.JSONB(astext_type=sa.Text()), server_default='{}', nullable=False))
+    op.add_column('projects', sa.Column('progress', jsonb_type, server_default='{}', nullable=False))
 
 
 def downgrade() -> None:

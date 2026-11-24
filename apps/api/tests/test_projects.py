@@ -102,3 +102,55 @@ async def test_project_board_type_validation(client):
         headers={"Authorization": f"Bearer {token}"},
     )
     assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_save_circuit_regression_cookie_and_cors(client):
+    """Regression test: verifies CORS preflight for port 5174, cookie set on login, and PATCH circuit_data."""
+    # 1. Verify CORS preflight on PATCH from localhost:5174
+    preflight = await client.options(
+        "/v1/projects",
+        headers={
+            "Origin": "http://localhost:5174",
+            "Access-Control-Request-Method": "PATCH",
+            "Access-Control-Request-Headers": "content-type",
+        },
+    )
+    assert preflight.status_code == 200
+    assert preflight.headers.get("access-control-allow-origin") == "http://localhost:5174"
+
+    # 2. Register / login and verify Set-Cookie cm_token
+    reg_resp = await client.post(
+        "/v1/auth/register",
+        json={"email": "cookie_user@example.com", "password": "password123", "display_name": "Cookie User"},
+    )
+    assert reg_resp.status_code == 201
+    assert "cm_token" in reg_resp.cookies
+
+    # 3. Create project
+    create_resp = await client.post(
+        "/v1/projects",
+        json={"title": "Saved Circuit", "board_type": "breadboard"},
+    )
+    assert create_resp.status_code == 201
+    project_id = create_resp.json()["id"]
+
+    # 4. PATCH circuit_data using cookie auth
+    patch_payload = {
+        "circuit_data": {
+            "v": 1,
+            "components": [
+                {"id": "r1", "partId": "resistor", "x": 100, "y": 150},
+                {"id": "d1", "partId": "led.red", "x": 200, "y": 150},
+            ],
+            "wires": [{"from": "r1:1", "to": "d1:0"}],
+        }
+    }
+    patch_resp = await client.patch(
+        f"/v1/projects/{project_id}",
+        json=patch_payload,
+    )
+    assert patch_resp.status_code == 200
+    saved = patch_resp.json()
+    assert len(saved["circuit_data"]["components"]) == 2
+

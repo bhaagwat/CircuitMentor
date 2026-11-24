@@ -1,7 +1,10 @@
 """CircuitMentor API — configuration via environment variables."""
 
 import warnings
+from pathlib import Path
 from pydantic_settings import BaseSettings
+
+_REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
 class Settings(BaseSettings):
@@ -27,14 +30,31 @@ class Settings(BaseSettings):
     mentor_model: str = "anthropic/claude-3.5-haiku"
 
     # CORS
-    CORS_ORIGINS: str = "http://localhost:5173,http://localhost:5174,http://localhost:3000"
+    CORS_ORIGINS: str = (
+        "http://localhost:5173,http://localhost:5174,http://127.0.0.1:5173,http://127.0.0.1:5174,http://localhost:3000,http://127.0.0.1:3000"
+    )
 
     @property
     def cors_origins_list(self) -> list[str]:
-        return [o.strip() for o in self.CORS_ORIGINS.split(",")]
+        configured = [o.strip() for o in self.CORS_ORIGINS.split(",") if o.strip()]
+        defaults = [
+            "http://localhost:5173",
+            "http://localhost:5174",
+            "http://127.0.0.1:5173",
+            "http://127.0.0.1:5174",
+            "http://localhost:3000",
+            "http://127.0.0.1:3000",
+        ]
+        return list(dict.fromkeys(configured + defaults))
 
     model_config = {
-        "env_file": [".env", "apps/api/.env"],
+        "env_file": [
+            _REPO_ROOT / ".env",
+            _REPO_ROOT / "apps" / "api" / ".env",
+            ".env",
+            "apps/api/.env",
+            "../.env",
+        ],
         "env_file_encoding": "utf-8",
         "extra": "ignore",
     }
