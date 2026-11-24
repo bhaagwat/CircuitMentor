@@ -16,6 +16,13 @@ export default function LoginPage({
 
   return (
     <div className="login-shell" role="region" aria-label="Sign in to CircuitMentor">
+      {/* Ambient Apple-style blur gradient orbs */}
+      <div className="login-ambient-bg" aria-hidden="true">
+        <div className="login-orb login-orb-1" />
+        <div className="login-orb login-orb-2" />
+        <div className="login-orb login-orb-3" />
+      </div>
+
       <div className="login-container">
         {/* Left Column: Form / Sign-in */}
         <div className="login-form-col">
