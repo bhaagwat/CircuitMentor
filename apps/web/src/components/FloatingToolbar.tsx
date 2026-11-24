@@ -11,10 +11,11 @@ interface FloatingToolbarProps {
   onZoomIn: () => void;
   onZoomOut: () => void;
   onZoomReset?: () => void;
+  onZoomFit?: () => void;
   ercCount: number;
   onOpenErc?: () => void;
-  activeTool?: 'select' | 'wire';
-  onSelectTool?: (tool: 'select' | 'wire') => void;
+  activeTool?: 'select' | 'pan' | 'wire';
+  onSelectTool?: (tool: 'select' | 'pan' | 'wire') => void;
   onUndo?: () => void;
   onRedo?: () => void;
   canUndo?: boolean;
@@ -28,6 +29,7 @@ export default function FloatingToolbar({
   onZoomIn,
   onZoomOut,
   onZoomReset,
+  onZoomFit,
   ercCount,
   onOpenErc,
   activeTool = 'select',
@@ -41,16 +43,61 @@ export default function FloatingToolbar({
 }: FloatingToolbarProps) {
   return (
     <TooltipProvider delayDuration={140} skipDelayDuration={0}>
-      <div className="canvas-toolbar-pill glass" role="toolbar" aria-label="Canvas controls">
-        {/* Cluster 1: [ Wire | Select ] */}
+      <div
+        className="canvas-toolbar-pill glass"
+        role="toolbar"
+        aria-label="Canvas controls"
+        onPointerDown={(e) => e.stopPropagation()}
+        onMouseDown={(e) => e.stopPropagation()}
+      >
+        {/* Cluster 1: [ Select (V) | Pan (H) | Wire (W) ] */}
         <div className="toolbar-cluster" role="group" aria-label="Editing tools">
           <Tooltip>
             <TooltipTrigger asChild>
               <button
                 type="button"
+                className={`toolbar-btn ${activeTool === 'select' ? 'active' : ''}`}
+                onClick={() => onSelectTool?.('select')}
+                aria-label="Select tool (V)"
+              >
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M3 3l7 18 3-7 7-3L3 3z" />
+                </svg>
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="top" sideOffset={8}>
+              Select Tool (V)
+            </TooltipContent>
+          </Tooltip>
+
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                className={`toolbar-btn ${activeTool === 'pan' ? 'active' : ''}`}
+                onClick={() => onSelectTool?.(activeTool === 'pan' ? 'select' : 'pan')}
+                aria-label="Pan tool (H)"
+              >
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M18 11V6a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v0" />
+                  <path d="M14 10V4a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v2" />
+                  <path d="M10 10.5V6a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v8" />
+                  <path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15" />
+                </svg>
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="top" sideOffset={8}>
+              Pan Hand Tool (H)
+            </TooltipContent>
+          </Tooltip>
+
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
                 className={`toolbar-btn ${activeTool === 'wire' ? 'active' : ''}`}
-                onClick={() => onSelectTool?.('wire')}
-                aria-label="Wire tool"
+                onClick={() => onSelectTool?.(activeTool === 'wire' ? 'select' : 'wire')}
+                aria-label="Wire tool (W)"
               >
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M4 20L12 12L20 4" />
@@ -61,24 +108,6 @@ export default function FloatingToolbar({
             </TooltipTrigger>
             <TooltipContent side="top" sideOffset={8}>
               Wire Tool (W)
-            </TooltipContent>
-          </Tooltip>
-
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                type="button"
-                className={`toolbar-btn ${activeTool === 'select' ? 'active' : ''}`}
-                onClick={() => onSelectTool?.('select')}
-                aria-label="Select tool"
-              >
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M3 3l7 18 3-7 7-3L3 3z" />
-                </svg>
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="top" sideOffset={8}>
-              Select Tool (V)
             </TooltipContent>
           </Tooltip>
         </div>
@@ -174,6 +203,21 @@ export default function FloatingToolbar({
               {isMac ? 'Zoom In (⌘+)' : 'Zoom In (Ctrl++)'}
             </TooltipContent>
           </Tooltip>
+
+          {onZoomFit && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button type="button" className="toolbar-btn" onClick={onZoomFit} aria-label="Zoom to fit">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" />
+                  </svg>
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="top" sideOffset={8}>
+                Zoom to Fit (Shift+1)
+              </TooltipContent>
+            </Tooltip>
+          )}
         </div>
 
         <div className="toolbar-divider" />
@@ -184,14 +228,29 @@ export default function FloatingToolbar({
             <TooltipTrigger asChild>
               <button
                 type="button"
-                className={`toolbar-run-btn ${isSimulating ? 'running' : ''}`}
+                className={`toolbar-run-btn ${isSimulating ? 'running' : ercCount > 0 ? 'has-issues' : ''}`}
                 onClick={onToggleSimulation}
-                aria-label={isSimulating ? 'Halt simulation' : 'Run simulation'}
+                aria-label={
+                  isSimulating
+                    ? 'Halt simulation'
+                    : ercCount > 0
+                    ? `Run simulation (${ercCount} ${ercCount === 1 ? 'issue' : 'issues'})`
+                    : 'Run simulation'
+                }
               >
                 {isSimulating ? (
                   <>
                     <span className="run-dot-pulsing" />
                     <span>Simulating</span>
+                  </>
+                ) : ercCount > 0 ? (
+                  <>
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                      <polygon points="6,3 20,12 6,21" />
+                    </svg>
+                    <span>
+                      Run ({ercCount} {ercCount === 1 ? 'issue' : 'issues'})
+                    </span>
                   </>
                 ) : (
                   <>

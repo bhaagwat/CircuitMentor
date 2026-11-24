@@ -4,11 +4,13 @@
   "version": "0.1.0",
   "description": "AI-mentored circuit simulation learning platform",
   "scripts": {
-    "dev": "pnpm --filter @circuitmentor/web dev",
+    "dev": "concurrently -k -n \"api,web\" -c \"cyan.bold,blue.bold\" \"pnpm api:dev\" \"pnpm web:dev\"",
+    "web:dev": "pnpm --filter @circuitmentor/web dev",
+    "api:dev": "python -m uvicorn --app-dir apps/api app.main:app --reload --port 8000",
     "build": "pnpm --filter @circuitmentor/web build",
+    "test": "pnpm --filter @circuitmentor/web test",
     "typecheck": "pnpm --filter @circuitmentor/web tsc --noEmit",
     "lint": "pnpm --filter @circuitmentor/web lint",
-    "api:dev": "cd apps/api && uvicorn app.main:app --reload --port 8000",
     "api:migrate": "cd apps/api && alembic upgrade head",
     "api:seed": "cd apps/api && python -m app.seed",
     "docker:up": "docker compose up -d",
@@ -17,5 +19,8 @@
   "packageManager": "pnpm@9.12.0",
   "engines": {
     "node": ">=20"
+  },
+  "devDependencies": {
+    "concurrently": "^10.0.7"
   }
 }

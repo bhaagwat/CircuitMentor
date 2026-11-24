@@ -1,7 +1,17 @@
 import React, { useState, useCallback, useRef, useEffect, useMemo, memo } from 'react';
 import type { PlacedComponent, ErcFinding } from '../App';
 import FloatingToolbar from './FloatingToolbar';
+import HintLayer from './HintLayer';
+import type { HintHighlight } from '../lib/erc/types';
+import { runDcSimulation, type SimulationResult } from '../lib/sim/dcSim';
 import { getPartMeta } from '@/lib/parts';
+import {
+  routeAllWires,
+  findClosestPointOnPolyline,
+  computeRotatedPinWorld,
+  getPinLocalPositions,
+  type RoutedWire,
+} from '../lib/canvas/wireRouter';
 
 export interface WireConnection {
   id: string;
@@ -10,6 +20,15 @@ export interface WireConnection {
   toId: string;
   toPin: number;
   netType: 'vcc' | 'gnd' | 'signal';
+}
+
+export interface AddWireWithJunctionsPayload {
+  fromId: string;
+  fromPin: number;
+  fromSplit?: { wireId: string; x: number; y: number };
+  toId: string;
+  toPin: number;
+  toSplit?: { wireId: string; x: number; y: number };
 }
 
 interface CanvasProps {
@@ -24,6 +43,7 @@ interface CanvasProps {
   onUpdateComponentPositions: (updates: Array<{ id: string; x: number; y: number }>) => void;
   onPlaceComponent?: (partId: string, x: number, y: number) => void;
   onAddWire?: (fromId: string, fromPin: number, toId: string, toPin: number) => void;
+  onAddWireWithJunctions?: (payload: AddWireWithJunctionsPayload) => void;
   onDeleteWire?: (wireId: string) => void;
   onDeleteSelected?: () => void;
   onClearSelectedLibraryPart?: () => void;
@@ -35,8 +55,19 @@ interface CanvasProps {
   isSimulating?: boolean;
   onToggleSimulation?: () => void;
   onOpenErc?: () => void;
-  activeTool?: 'select' | 'wire';
-  onSelectTool?: (tool: 'select' | 'wire') => void;
+  activeTool?: 'select' | 'pan' | 'wire';
+  onSelectTool?: (tool: 'select' | 'pan' | 'wire') => void;
+  hintHighlight?: HintHighlight | null;
+  hintLevel?: 1 | 2 | 3 | 4;
+  // Selection & Update triggers
+  selectedWireId?: string | null;
+  onSelectWire?: (wireId: string | null) => void;
+  onUpdateComponent?: (id: string, updates: Partial<PlacedComponent>) => void;
+  // Editor settings
+  gridSnap?: number;
+  autoRouteWires?: boolean;
+  showPinLabels?: boolean;
+  showGrid?: boolean;
 }
 
 const DEFAULT_WIRES: WireConnection[] = [
@@ -58,6 +89,7 @@ export default function Canvas({
   onUpdateComponentPositions,
   onPlaceComponent,
   onAddWire,
+  onAddWireWithJunctions,
   onDeleteWire,
   onDeleteSelected,
   onClearSelectedLibraryPart,
@@ -70,6 +102,15 @@ export default function Canvas({
   onOpenErc,
   activeTool: controlledTool,
   onSelectTool,
+  hintHighlight = null,
+  hintLevel = 1,
+  selectedWireId: controlledWireId,
+  onSelectWire,
+  onUpdateComponent,
+  gridSnap = 10,
+  autoRouteWires = true,
+  showPinLabels = true,
+  showGrid = true,
 }: CanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
@@ -108,26 +149,40 @@ export default function Canvas({
       setZoom(100);
       setPan({ x: 60, y: 40 });
     };
+    const onZoomInEvent = () => setZoom((prev) => Math.min(400, prev + 25));
+    const onZoomOutEvent = () => setZoom((prev) => Math.max(20, prev - 25));
     window.addEventListener('cm-zoom-fit', onZoomFitEvent);
     window.addEventListener('cm-zoom-100', onZoom100Event);
+    window.addEventListener('cm-zoom-in', onZoomInEvent);
+    window.addEventListener('cm-zoom-out', onZoomOutEvent);
     return () => {
       window.removeEventListener('cm-zoom-fit', onZoomFitEvent);
       window.removeEventListener('cm-zoom-100', onZoom100Event);
+      window.removeEventListener('cm-zoom-in', onZoomInEvent);
+      window.removeEventListener('cm-zoom-out', onZoomOutEvent);
     };
   }, [handleZoomFit]);
 
   const [isSpacePressed, setIsSpacePressed] = useState(false);
   const [isPanning, setIsPanning] = useState(false);
-  const [localTool, setLocalTool] = useState<'select' | 'wire'>('select');
+  const [localTool, setLocalTool] = useState<'select' | 'pan' | 'wire'>('select');
   const activeTool = controlledTool !== undefined ? controlledTool : localTool;
   const handleSelectTool = useCallback(
-    (tool: 'select' | 'wire') => {
+    (tool: 'select' | 'pan' | 'wire') => {
       setLocalTool(tool);
       onSelectTool?.(tool);
     },
     [onSelectTool]
   );
-  const [selectedWireId, setSelectedWireId] = useState<string | null>(null);
+  const [localWireId, setLocalWireId] = useState<string | null>(null);
+  const selectedWireId = controlledWireId !== undefined ? controlledWireId : localWireId;
+  const setSelectedWireId = useCallback(
+    (id: string | null) => {
+      setLocalWireId(id);
+      onSelectWire?.(id);
+    },
+    [onSelectWire]
+  );
   const [ghostPos, setGhostPos] = useState<{ x: number; y: number } | null>(null);
 
   useEffect(() => {
@@ -144,7 +199,47 @@ export default function Canvas({
     startY: number;
     currentX: number;
     currentY: number;
+    pendingSplit?: { wireId: string; x: number; y: number };
   } | null>(null);
+
+  // Wire junction snap preview when hovering existing wires in Wire mode
+  const [hoveredWireSnap, setHoveredWireSnap] = useState<{
+    wireId: string;
+    x: number;
+    y: number;
+  } | null>(null);
+
+  // Magnetic pin snap preview when drawing wire
+  const [hoveredPinSnap, setHoveredPinSnap] = useState<{
+    compId: string;
+    pinIdx: number;
+    x: number;
+    y: number;
+  } | null>(null);
+
+  // Pin pointer down tracker for drag-to-connect vs click-to-connect
+  const pinPointerDownPos = useRef<{
+    compId: string;
+    pinIdx: number;
+    clientX: number;
+    clientY: number;
+  } | null>(null);
+
+  const routedWires: RoutedWire[] = useMemo(
+    () => routeAllWires(components, wires, autoRouteWires),
+    [components, wires, autoRouteWires]
+  );
+
+  const routedWireMap = useMemo(
+    () => new Map(routedWires.map((rw) => [rw.wireId, rw])),
+    [routedWires]
+  );
+
+  const snapStep = Math.max(1, gridSnap);
+  const snapVal = useCallback(
+    (v: number) => Math.round(v / snapStep) * snapStep,
+    [snapStep]
+  );
 
   // Marquee state
   const [marquee, setMarquee] = useState<{ startX: number; startY: number; currentX: number; currentY: number } | null>(null);
@@ -174,14 +269,20 @@ export default function Canvas({
       }
       if ((e.key === 'Backspace' || e.key === 'Delete') && (e.target as HTMLElement).tagName !== 'INPUT' && (e.target as HTMLElement).tagName !== 'TEXTAREA') {
         if (selectedWireId) {
+          e.preventDefault();
+          e.stopPropagation();
           onDeleteWire?.(selectedWireId);
           setSelectedWireId(null);
-        } else if (onDeleteSelected) {
-          onDeleteSelected();
+        } else if (selectedIds.length > 0) {
+          e.preventDefault();
+          e.stopPropagation();
+          onDeleteSelected?.();
         }
       }
       if (e.key === 'Escape') {
         setDrawingWire(null);
+        setHoveredWireSnap(null);
+        setHoveredPinSnap(null);
         onClearSelectedLibraryPart?.();
         setGhostPos(null);
         onClearSelection();
@@ -199,7 +300,7 @@ export default function Canvas({
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
     };
-  }, [isSpacePressed, selectedWireId, onDeleteWire, onDeleteSelected, onClearSelectedLibraryPart, onClearSelection]);
+  }, [isSpacePressed, selectedWireId, selectedIds, onDeleteWire, onDeleteSelected, onClearSelectedLibraryPart, onClearSelection, setSelectedWireId]);
 
   // Two-Finger Trackpad Pan OR Cursor-Centered Wheel Zoom
   const handleWheel = useCallback(
@@ -234,22 +335,53 @@ export default function Canvas({
     [pan, scale, zoom]
   );
 
-  // Background Pointer Down: Pan, Marquee, or Cancel Drawing Wire
+  // Background Pointer Down: Pan, Marquee, or Place Component
   const handleCanvasPointerDown = useCallback(
     (e: React.PointerEvent) => {
-      // If actively drawing a wire, clicking empty canvas cancels wire creation
-      if (drawingWire) {
-        setDrawingWire(null);
+      if ((e.target as HTMLElement).closest('.canvas-toolbar-pill, .canvas-sim-readout')) {
         return;
       }
 
-      // Middle-mouse drag OR Space+drag OR touch drag
-      if (e.button === 1 || (e.button === 0 && isSpacePressed) || e.pointerType === 'touch') {
+      // If actively drawing a wire
+      if (drawingWire) {
+        if (hoveredPinSnap) {
+          onAddWire?.(drawingWire.fromId, drawingWire.fromPin, hoveredPinSnap.compId, hoveredPinSnap.pinIdx);
+          setDrawingWire(null);
+          setHoveredPinSnap(null);
+          setHoveredWireSnap(null);
+          return;
+        }
+        if (hoveredWireSnap) {
+          onAddWireWithJunctions?.({
+            fromId: drawingWire.fromId,
+            fromPin: drawingWire.fromPin,
+            fromSplit: drawingWire.pendingSplit,
+            toId: '__SPLIT__',
+            toPin: 0,
+            toSplit: { wireId: hoveredWireSnap.wireId, x: hoveredWireSnap.x, y: hoveredWireSnap.y },
+          });
+          setDrawingWire(null);
+          setHoveredPinSnap(null);
+          setHoveredWireSnap(null);
+          return;
+        }
+        setDrawingWire(null);
+        setHoveredPinSnap(null);
+        setHoveredWireSnap(null);
+        return;
+      }
+
+      // Middle-mouse drag OR Space+drag OR touch drag OR activeTool === 'pan'
+      if (
+        e.button === 1 ||
+        (e.button === 0 && (isSpacePressed || activeTool === 'pan')) ||
+        e.pointerType === 'touch'
+      ) {
         setIsPanning(true);
         panRef.current = { x: e.clientX, y: e.clientY };
         panStartPos.current = { x: e.clientX, y: e.clientY };
         try {
-          (e.currentTarget as Element).setPointerCapture(e.pointerId);
+          containerRef.current?.setPointerCapture(e.pointerId);
         } catch {
           // ignore
         }
@@ -263,39 +395,80 @@ export default function Canvas({
         const canvasX = (e.clientX - rect.left - pan.x) / scale;
         const canvasY = (e.clientY - rect.top - pan.y) / scale;
 
-        if (e.shiftKey) {
-          // Marquee selection
+        // 1. Click-to-place selected library part
+        if (selectedLibraryPart && onPlaceComponent && !isSpacePressed) {
+          onPlaceComponent(selectedLibraryPart, snapVal(canvasX), snapVal(canvasY));
+          onClearSelectedLibraryPart?.();
+          setGhostPos(null);
+          return;
+        }
+
+        // Clicking empty canvas clears both component and wire selections
+        onClearSelection();
+        setSelectedWireId(null);
+
+        if (activeTool === 'pan' || isSpacePressed) {
+          setIsPanning(true);
+          panRef.current = { x: e.clientX, y: e.clientY };
+          panStartPos.current = { x: e.clientX, y: e.clientY };
+        } else if (e.shiftKey || activeTool === 'select') {
+          // Direct marquee box selection in Select mode
           setMarquee({
             startX: canvasX,
             startY: canvasY,
             currentX: canvasX,
             currentY: canvasY,
           });
-        } else {
-          setIsPanning(true);
-          panRef.current = { x: e.clientX, y: e.clientY };
-          panStartPos.current = { x: e.clientX, y: e.clientY };
         }
 
         try {
-          (e.currentTarget as Element).setPointerCapture(e.pointerId);
+          containerRef.current.setPointerCapture(e.pointerId);
         } catch {
           // ignore
         }
       }
     },
-    [drawingWire, isSpacePressed, pan, scale]
+    [
+      activeTool,
+      drawingWire,
+      hoveredPinSnap,
+      hoveredWireSnap,
+      isSpacePressed,
+      onAddWire,
+      onAddWireWithJunctions,
+      onClearSelectedLibraryPart,
+      onClearSelection,
+      onPlaceComponent,
+      pan,
+      scale,
+      selectedLibraryPart,
+      setSelectedWireId,
+      snapVal,
+    ]
   );
 
-  // Component Pointer Down: Start immediate DOM drag
+  // Component Pointer Down: Start immediate DOM drag or place library component
   const handleComponentPointerDown = useCallback(
     (e: React.PointerEvent, comp: PlacedComponent) => {
       e.stopPropagation();
 
-      // If drawing a wire, don't initiate component drag
+      // If library part is active, place it
+      if (selectedLibraryPart && onPlaceComponent && !isSpacePressed) {
+        if (containerRef.current) {
+          const rect = containerRef.current.getBoundingClientRect();
+          const canvasX = (e.clientX - rect.left - pan.x) / scale;
+          const canvasY = (e.clientY - rect.top - pan.y) / scale;
+          onPlaceComponent(selectedLibraryPart, snapVal(canvasX), snapVal(canvasY));
+          onClearSelectedLibraryPart?.();
+          setGhostPos(null);
+        }
+        return;
+      }
+
+      // If drawing a wire, clicking component body shouldn't drag it
       if (drawingWire) return;
 
-      if (isSpacePressed || e.button === 1) {
+      if (isSpacePressed || e.button === 1 || activeTool === 'pan') {
         setIsPanning(true);
         panRef.current = { x: e.clientX, y: e.clientY };
         panStartPos.current = { x: e.clientX, y: e.clientY };
@@ -309,10 +482,15 @@ export default function Canvas({
         return;
       }
 
+      setSelectedWireId(null);
+
       // Select component (if not already selected)
       if (!selectedIds.includes(comp.id)) {
         onSelectComponent(comp, e.shiftKey);
       }
+
+      // In Wire mode, allow clicking/selecting without accidentally dragging parts
+      if (activeTool === 'wire') return;
 
       const idsToDrag = selectedIds.includes(comp.id) ? selectedIds : [comp.id];
       const initialMap = new Map<string, { x: number; y: number; rot: number }>();
@@ -329,25 +507,40 @@ export default function Canvas({
       };
 
       try {
-        (e.currentTarget as Element).setPointerCapture(e.pointerId);
+        containerRef.current?.setPointerCapture(e.pointerId);
       } catch {
         // ignore
       }
     },
-    [components, drawingWire, isSpacePressed, onSelectComponent, selectedIds]
+    [activeTool, components, drawingWire, isSpacePressed, onSelectComponent, selectedIds]
   );
 
-  // Wire Pin Click: Start or finish wire connection
+  // Wire Pin Click: Start or finish wire connection (supports pending wire split at origin)
   const handlePinClick = useCallback(
     (e: React.PointerEvent, comp: PlacedComponent, pinIdx: number) => {
       e.stopPropagation();
-      const pinOffsets = getPinPositions(comp.partId);
-      const pinOffset = pinOffsets[pinIdx] ?? { x: 0, y: 0 };
-      const pinCanvasX = comp.x + pinOffset.x;
-      const pinCanvasY = comp.y + pinOffset.y;
+      if (selectedLibraryPart && onPlaceComponent && !isSpacePressed) {
+        if (containerRef.current) {
+          const rect = containerRef.current.getBoundingClientRect();
+          const canvasX = (e.clientX - rect.left - pan.x) / scale;
+          const canvasY = (e.clientY - rect.top - pan.y) / scale;
+          onPlaceComponent(selectedLibraryPart, snapVal(canvasX), snapVal(canvasY));
+          onClearSelectedLibraryPart?.();
+          setGhostPos(null);
+        }
+        return;
+      }
+      if (activeTool === 'pan') return;
+      const { x: pinCanvasX, y: pinCanvasY } = computeRotatedPinWorld(comp, pinIdx);
 
       if (!drawingWire) {
-        // Start wire drawing
+        setSelectedWireId(null);
+        pinPointerDownPos.current = {
+          compId: comp.id,
+          pinIdx,
+          clientX: e.clientX,
+          clientY: e.clientY,
+        };
         setDrawingWire({
           fromId: comp.id,
           fromPin: pinIdx,
@@ -357,14 +550,121 @@ export default function Canvas({
           currentY: pinCanvasY,
         });
       } else {
-        // Complete wire connection (cannot wire pin to itself)
-        if (drawingWire.fromId !== comp.id || drawingWire.fromPin !== pinIdx) {
+        if (drawingWire.pendingSplit) {
+          onAddWireWithJunctions?.({
+            fromId: drawingWire.fromId,
+            fromPin: drawingWire.fromPin,
+            fromSplit: drawingWire.pendingSplit,
+            toId: comp.id,
+            toPin: pinIdx,
+          });
+        } else if (drawingWire.fromId !== comp.id || drawingWire.fromPin !== pinIdx) {
           onAddWire?.(drawingWire.fromId, drawingWire.fromPin, comp.id, pinIdx);
         }
         setDrawingWire(null);
+        setHoveredPinSnap(null);
+        setHoveredWireSnap(null);
+        pinPointerDownPos.current = null;
       }
     },
-    [drawingWire, onAddWire]
+    [
+      activeTool,
+      drawingWire,
+      isSpacePressed,
+      onAddWire,
+      onAddWireWithJunctions,
+      onClearSelectedLibraryPart,
+      onPlaceComponent,
+      pan,
+      scale,
+      selectedLibraryPart,
+      setSelectedWireId,
+      snapVal,
+    ]
+  );
+
+  // Wire Segment Click / PointerDown: Select wire in Select mode, or create/connect T-junction in Wire mode
+  const handleWirePointerDown = useCallback(
+    (e: React.PointerEvent, wireId: string) => {
+      e.stopPropagation();
+      if (selectedLibraryPart && onPlaceComponent && !isSpacePressed) {
+        if (containerRef.current) {
+          const rect = containerRef.current.getBoundingClientRect();
+          const canvasX = (e.clientX - rect.left - pan.x) / scale;
+          const canvasY = (e.clientY - rect.top - pan.y) / scale;
+          onPlaceComponent(selectedLibraryPart, snapVal(canvasX), snapVal(canvasY));
+          onClearSelectedLibraryPart?.();
+          setGhostPos(null);
+        }
+        return;
+      }
+      if (isSpacePressed || e.button === 1 || activeTool === 'pan') {
+        setIsPanning(true);
+        panRef.current = { x: e.clientX, y: e.clientY };
+        panStartPos.current = { x: e.clientX, y: e.clientY };
+        if (containerRef.current) {
+          try {
+            containerRef.current.setPointerCapture(e.pointerId);
+          } catch {
+            // ignore
+          }
+        }
+        return;
+      }
+
+      if (activeTool === 'wire' || drawingWire) {
+        if (!containerRef.current) return;
+        const rect = containerRef.current.getBoundingClientRect();
+        const canvasX = (e.clientX - rect.left - pan.x) / scale;
+        const canvasY = (e.clientY - rect.top - pan.y) / scale;
+        const routed = routedWireMap.get(wireId);
+        const snapPt = routed
+          ? findClosestPointOnPolyline(routed.points, { x: canvasX, y: canvasY }).point
+          : { x: snapVal(canvasX), y: snapVal(canvasY) };
+
+        if (!drawingWire) {
+          setDrawingWire({
+            fromId: '__SPLIT__',
+            fromPin: 0,
+            startX: snapPt.x,
+            startY: snapPt.y,
+            currentX: snapPt.x,
+            currentY: snapPt.y,
+            pendingSplit: { wireId, x: snapPt.x, y: snapPt.y },
+          });
+        } else {
+          onAddWireWithJunctions?.({
+            fromId: drawingWire.fromId,
+            fromPin: drawingWire.fromPin,
+            fromSplit: drawingWire.pendingSplit,
+            toId: '__SPLIT__',
+            toPin: 0,
+            toSplit: { wireId, x: snapPt.x, y: snapPt.y },
+          });
+          setDrawingWire(null);
+          setHoveredPinSnap(null);
+          setHoveredWireSnap(null);
+        }
+        return;
+      }
+
+      // SELECT WIRE (do not call onClearSelection which resets selectedWireId to null!)
+      setSelectedWireId(wireId);
+    },
+    [
+      activeTool,
+      drawingWire,
+      isSpacePressed,
+      onAddWireWithJunctions,
+      onClearSelectedLibraryPart,
+      onPlaceComponent,
+      pan,
+      routedWireMap,
+      scale,
+      selectedLibraryPart,
+      setSelectedWireId,
+      snapVal,
+    ]
   );
 
   // Unified Pointer Move (60fps DOM drag, wire rubberband, marquee, and ghost preview)
@@ -375,9 +675,7 @@ export default function Canvas({
         const rect = containerRef.current.getBoundingClientRect();
         const canvasX = (e.clientX - rect.left - pan.x) / scale;
         const canvasY = (e.clientY - rect.top - pan.y) / scale;
-        const snappedX = Math.round(canvasX / 10) * 10;
-        const snappedY = Math.round(canvasY / 10) * 10;
-        setGhostPos({ x: snappedX, y: snappedY });
+        setGhostPos({ x: snapVal(canvasX), y: snapVal(canvasY) });
       }
 
       // 2. Viewport Panning
@@ -389,14 +687,56 @@ export default function Canvas({
         return;
       }
 
-      // 3. Rubberband Wire drawing follow
-      if (drawingWire) {
-        if (!containerRef.current) return;
+      // 3. Rubberband Wire drawing follow + Magnetic Pin Snap + Junction Snap Hover
+      if ((drawingWire || activeTool === 'wire') && containerRef.current) {
         const rect = containerRef.current.getBoundingClientRect();
         const canvasX = (e.clientX - rect.left - pan.x) / scale;
         const canvasY = (e.clientY - rect.top - pan.y) / scale;
-        setDrawingWire((prev) => (prev ? { ...prev, currentX: Math.round(canvasX), currentY: Math.round(canvasY) } : null));
-        return;
+
+        // Priority 1: Magnetic Pin Snapping
+        let bestPinSnap: { compId: string; pinIdx: number; x: number; y: number } | null = null;
+        let minPinDist = 22;
+
+        for (const comp of components) {
+          const pinPositions = getPinLocalPositions(comp.partId);
+          for (let pIdx = 0; pIdx < pinPositions.length; pIdx++) {
+            if (drawingWire && comp.id === drawingWire.fromId && pIdx === drawingWire.fromPin) continue;
+            const p = computeRotatedPinWorld(comp, pIdx);
+            const d = Math.hypot(canvasX - p.x, canvasY - p.y);
+            if (d < minPinDist) {
+              minPinDist = d;
+              bestPinSnap = { compId: comp.id, pinIdx: pIdx, x: p.x, y: p.y };
+            }
+          }
+        }
+        setHoveredPinSnap(bestPinSnap);
+
+        // Priority 2: Wire T-Junction Snapping (if not snapping to pin)
+        let bestSnap: { wireId: string; x: number; y: number } | null = null;
+        if (!bestPinSnap) {
+          let bestDist = 16;
+          for (const rw of routedWires) {
+            if (drawingWire?.pendingSplit?.wireId === rw.wireId) continue;
+            const res = findClosestPointOnPolyline(rw.points, { x: canvasX, y: canvasY });
+            if (res.distance < bestDist) {
+              bestDist = res.distance;
+              bestSnap = { wireId: rw.wireId, x: res.point.x, y: res.point.y };
+            }
+          }
+        }
+        setHoveredWireSnap(bestSnap);
+
+        if (drawingWire) {
+          const targetX = bestPinSnap ? bestPinSnap.x : bestSnap ? bestSnap.x : snapVal(canvasX);
+          const targetY = bestPinSnap ? bestPinSnap.y : bestSnap ? bestSnap.y : snapVal(canvasY);
+          setDrawingWire((prev) =>
+            prev ? { ...prev, currentX: targetX, currentY: targetY } : null
+          );
+          return;
+        }
+      } else {
+        if (hoveredPinSnap) setHoveredPinSnap(null);
+        if (hoveredWireSnap) setHoveredWireSnap(null);
       }
 
       // 4. Marquee Select
@@ -409,7 +749,7 @@ export default function Canvas({
         return;
       }
 
-      // 5. Component Dragging (Direct DOM manipulation at 60fps)
+      // 5. Component Dragging (Direct DOM manipulation at 60fps, snapped to grid)
       if (dragRef.current.isDragging) {
         const dx = (e.clientX - dragRef.current.startX) / scale;
         const dy = (e.clientY - dragRef.current.startY) / scale;
@@ -417,19 +757,99 @@ export default function Canvas({
         dragRef.current.initialPositions.forEach((init, id) => {
           const domElem = document.getElementById(`comp-elem-${id}`);
           if (domElem) {
-            const curX = Math.round(init.x + dx);
-            const curY = Math.round(init.y + dy);
+            const curX = snapVal(init.x + dx);
+            const curY = snapVal(init.y + dy);
             domElem.setAttribute('transform', `translate(${curX}, ${curY}) rotate(${init.rot})`);
           }
         });
+
+        // Fast live attached wire updates at 60fps
+        for (const wire of wires) {
+          const fromMoved = dragRef.current.initialPositions.get(wire.fromId);
+          const toMoved = dragRef.current.initialPositions.get(wire.toId);
+          if (!fromMoved && !toMoved) continue;
+
+          const fromComp = components.find((c) => c.id === wire.fromId);
+          const toComp = components.find((c) => c.id === wire.toId);
+          if (!fromComp || !toComp) continue;
+
+          const p1 = computeRotatedPinWorld(
+            fromMoved ? { ...fromComp, x: snapVal(fromMoved.x + dx), y: snapVal(fromMoved.y + dy) } : fromComp,
+            wire.fromPin
+          );
+          const p2 = computeRotatedPinWorld(
+            toMoved ? { ...toComp, x: snapVal(toMoved.x + dx), y: snapVal(toMoved.y + dy) } : toComp,
+            wire.toPin
+          );
+
+          const midX = Math.round((p1.x + p2.x) / 2);
+          const liveD = `M ${p1.x} ${p1.y} L ${midX} ${p1.y} L ${midX} ${p2.y} L ${p2.x} ${p2.y}`;
+
+          const wireGroup = document.getElementById(`wire-group-${wire.id}`);
+          if (wireGroup) {
+            const paths = wireGroup.querySelectorAll('path');
+            paths.forEach((p) => p.setAttribute('d', liveD));
+          }
+        }
       }
     },
-    [drawingWire, isPanning, marquee, pan, scale, selectedLibraryPart]
+    [
+      activeTool,
+      components,
+      drawingWire,
+      hoveredWireSnap,
+      isPanning,
+      marquee,
+      pan,
+      routedWires,
+      scale,
+      selectedLibraryPart,
+      snapVal,
+      wires,
+    ]
   );
 
   // Pointer Up: Release capture and commit final coordinates (single commit on release)
   const handlePointerUp = useCallback(
     (e: React.PointerEvent) => {
+      // Drag-to-connect wire completion
+      if (drawingWire && pinPointerDownPos.current) {
+        const dragDist = Math.hypot(
+          e.clientX - pinPointerDownPos.current.clientX,
+          e.clientY - pinPointerDownPos.current.clientY
+        );
+        if (dragDist > 10) {
+          if (hoveredPinSnap) {
+            onAddWire?.(
+              drawingWire.fromId,
+              drawingWire.fromPin,
+              hoveredPinSnap.compId,
+              hoveredPinSnap.pinIdx
+            );
+            setDrawingWire(null);
+            setHoveredPinSnap(null);
+            setHoveredWireSnap(null);
+            pinPointerDownPos.current = null;
+            return;
+          } else if (hoveredWireSnap) {
+            onAddWireWithJunctions?.({
+              fromId: drawingWire.fromId,
+              fromPin: drawingWire.fromPin,
+              fromSplit: drawingWire.pendingSplit,
+              toId: '__SPLIT__',
+              toPin: 0,
+              toSplit: { wireId: hoveredWireSnap.wireId, x: hoveredWireSnap.x, y: hoveredWireSnap.y },
+            });
+            setDrawingWire(null);
+            setHoveredPinSnap(null);
+            setHoveredWireSnap(null);
+            pinPointerDownPos.current = null;
+            return;
+          }
+        }
+        pinPointerDownPos.current = null;
+      }
+
       if (isPanning) {
         setIsPanning(false);
         const dist = Math.hypot(e.clientX - panStartPos.current.x, e.clientY - panStartPos.current.y);
@@ -440,9 +860,7 @@ export default function Canvas({
             const rect = containerRef.current.getBoundingClientRect();
             const canvasX = (e.clientX - rect.left - pan.x) / scale;
             const canvasY = (e.clientY - rect.top - pan.y) / scale;
-            const snappedX = Math.round(canvasX / 10) * 10;
-            const snappedY = Math.round(canvasY / 10) * 10;
-            onPlaceComponent(selectedLibraryPart, snappedX, snappedY);
+            onPlaceComponent(selectedLibraryPart, snapVal(canvasX), snapVal(canvasY));
             onClearSelectedLibraryPart?.();
             setGhostPos(null);
           }
@@ -452,7 +870,7 @@ export default function Canvas({
         }
 
         try {
-          (e.currentTarget as Element).releasePointerCapture(e.pointerId);
+          containerRef.current?.releasePointerCapture(e.pointerId);
         } catch {
           // ignore
         }
@@ -471,7 +889,7 @@ export default function Canvas({
         }
         setMarquee(null);
         try {
-          (e.currentTarget as Element).releasePointerCapture(e.pointerId);
+          containerRef.current?.releasePointerCapture(e.pointerId);
         } catch {
           // ignore
         }
@@ -487,16 +905,26 @@ export default function Canvas({
           dragRef.current.initialPositions.forEach((init, id) => {
             updates.push({
               id,
-              x: Math.round(init.x + dx),
-              y: Math.round(init.y + dy),
+              x: snapVal(init.x + dx),
+              y: snapVal(init.y + dy),
             });
           });
           onUpdateComponentPositions(updates);
+        } else if (dragRef.current.initialPositions.size === 1) {
+          // If clicked without dragging, toggle switch or pushbutton
+          const clickedId = dragRef.current.initialPositions.keys().next().value;
+          const comp = components.find((c) => c.id === clickedId);
+          if (comp && (comp.partId === 'switch.spst' || comp.partId === 'pushbutton')) {
+            const curState = (comp.params.state ?? 'closed') === 'closed' ? 'open' : 'closed';
+            onUpdateComponent?.(comp.id, {
+              params: { ...comp.params, state: curState },
+            });
+          }
         }
 
         dragRef.current.isDragging = false;
         try {
-          (e.currentTarget as Element).releasePointerCapture(e.pointerId);
+          containerRef.current?.releasePointerCapture(e.pointerId);
         } catch {
           // ignore
         }
@@ -504,17 +932,25 @@ export default function Canvas({
     },
     [
       components,
+      drawingWire,
+      hoveredPinSnap,
+      hoveredWireSnap,
       isPanning,
       isSpacePressed,
       marquee,
+      onAddWire,
+      onAddWireWithJunctions,
       onClearSelectedLibraryPart,
       onClearSelection,
       onPlaceComponent,
       onSelectComponent,
+      onUpdateComponent,
       onUpdateComponentPositions,
       pan,
       scale,
       selectedLibraryPart,
+      setSelectedWireId,
+      snapVal,
     ]
   );
 
@@ -536,18 +972,15 @@ export default function Canvas({
       const canvasX = (e.clientX - rect.left - pan.x) / scale;
       const canvasY = (e.clientY - rect.top - pan.y) / scale;
 
-      // Snap drop coordinates to 10px pitch
-      const snappedX = Math.round(canvasX / 10) * 10;
-      const snappedY = Math.round(canvasY / 10) * 10;
-
-      onPlaceComponent(partId, snappedX, snappedY);
+      onPlaceComponent(partId, snapVal(canvasX), snapVal(canvasY));
     },
-    [onPlaceComponent, pan, scale]
+    [onPlaceComponent, pan, scale, snapVal]
   );
 
-  const handleSelectWire = useCallback((wireId: string) => {
-    setSelectedWireId(wireId);
-  }, []);
+  const simResult: SimulationResult | null = useMemo(() => {
+    if (!isSimulating) return null;
+    return runDcSimulation(components, wires);
+  }, [isSimulating, components, wires]);
 
   // Two-tier grid dot parameters
   const minorPitch = 10 * scale;
@@ -560,108 +993,177 @@ export default function Canvas({
   const majorOffsetY = (((pan.y - majorPitch / 2) % majorPitch) + majorPitch) % majorPitch;
 
   return (
-    <div
-      ref={containerRef}
-      className={`canvas-container ${isPanning ? 'is-panning' : ''} ${isSpacePressed ? 'space-held' : ''}`}
-      style={{
-        cursor: isPanning
-          ? 'grabbing'
-          : isSpacePressed
-          ? 'grab'
-          : drawingWire
-          ? 'crosshair'
-          : selectedLibraryPart
-          ? 'copy'
-          : 'default',
-      }}
-      onWheel={handleWheel}
-      onPointerDown={handleCanvasPointerDown}
-      onPointerMove={handlePointerMove}
-      onPointerUp={handlePointerUp}
-      onDragOver={handleDragOver}
-      onDrop={handleDrop}
-    >
-      <svg ref={svgRef} className="canvas-svg">
-        <defs>
-          {/* Minor Dot Grid (10px pitch = 2.54mm at 100% zoom) */}
-          <pattern
-            id="minorDotGrid"
-            x={minorOffsetX}
-            y={minorOffsetY}
-            width={minorPitch}
-            height={minorPitch}
-            patternUnits="userSpaceOnUse"
-          >
-            <circle
-              cx={minorPitch / 2}
-              cy={minorPitch / 2}
-              r={1}
-              fill="rgba(255, 255, 255, 0.10)"
-            />
-          </pattern>
-
-          {/* Major Dot Grid (every 5th minor dot = 50px pitch) */}
-          <pattern
-            id="majorDotGrid"
-            x={majorOffsetX}
-            y={majorOffsetY}
-            width={majorPitch}
-            height={majorPitch}
-            patternUnits="userSpaceOnUse"
-          >
-            <circle
-              cx={majorPitch / 2}
-              cy={majorPitch / 2}
-              r={1.5}
-              fill="rgba(255, 255, 255, 0.18)"
-            />
-          </pattern>
-        </defs>
-
-        {/* Void Background */}
-        <rect width="100%" height="100%" fill="var(--void)" />
-
-        {/* Dot Grids */}
-        <rect width="100%" height="100%" fill="url(#minorDotGrid)" pointerEvents="none" />
-        <rect width="100%" height="100%" fill="url(#majorDotGrid)" pointerEvents="none" />
-
-        {/* Content Group (Pan & Zoom Transformed) */}
-        <g transform={`translate(${pan.x}, ${pan.y}) scale(${scale})`}>
-          <CircuitContent
-            components={components}
-            wires={wires}
-            selectedIds={selectedIds}
-            selectedWireId={selectedWireId}
-            highlightedId={highlightedId}
-            findings={findings}
-            drawingOrigin={drawingWire ? { compId: drawingWire.fromId, pinIdx: drawingWire.fromPin } : null}
-            isSpacePressed={isSpacePressed}
-            onComponentPointerDown={handleComponentPointerDown}
-            onPinClick={handlePinClick}
-            onSelectWire={handleSelectWire}
-          />
-
-          {/* Active Wire Drawing Rubberband Line */}
-          {drawingWire && (
-            <g className="rubberband-wire" pointerEvents="none">
-              <path
-                d={`M ${drawingWire.startX},${drawingWire.startY} L ${drawingWire.currentX},${drawingWire.currentY}`}
-                stroke="var(--blue)"
-                strokeWidth="2.5"
-                strokeLinecap="round"
-                strokeDasharray="6 4"
-              />
+    <div className="canvas-container">
+      <div
+        ref={containerRef}
+        className={`canvas-svg-layer ${isPanning ? 'is-panning' : ''} ${isSpacePressed ? 'space-held' : ''}`}
+        style={{
+          cursor: isPanning
+            ? 'grabbing'
+            : activeTool === 'pan' || isSpacePressed
+            ? 'grab'
+            : drawingWire || activeTool === 'wire'
+            ? 'crosshair'
+            : selectedLibraryPart
+            ? 'copy'
+            : 'default',
+        }}
+        onWheel={handleWheel}
+        onPointerDown={handleCanvasPointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+        onDragOver={handleDragOver}
+        onDrop={handleDrop}
+      >
+        <svg ref={svgRef} className="canvas-svg">
+          <defs>
+            {/* Minor Dot Grid (10px pitch = 2.54mm at 100% zoom) */}
+            <pattern
+              id="minorDotGrid"
+              x={minorOffsetX}
+              y={minorOffsetY}
+              width={minorPitch}
+              height={minorPitch}
+              patternUnits="userSpaceOnUse"
+            >
               <circle
-                cx={drawingWire.currentX}
-                cy={drawingWire.currentY}
-                r="4.5"
-                fill="var(--blue)"
-                stroke="#FFFFFF"
-                strokeWidth="1.5"
-                style={{ filter: 'drop-shadow(0 0 6px var(--blue))' }}
+                cx={minorPitch / 2}
+                cy={minorPitch / 2}
+                r={1}
+                fill="rgba(255, 255, 255, 0.10)"
               />
-            </g>
+            </pattern>
+
+            {/* Major Dot Grid (every 5th minor dot = 50px pitch) */}
+            <pattern
+              id="majorDotGrid"
+              x={majorOffsetX}
+              y={majorOffsetY}
+              width={majorPitch}
+              height={majorPitch}
+              patternUnits="userSpaceOnUse"
+            >
+              <circle
+                cx={majorPitch / 2}
+                cy={majorPitch / 2}
+                r={1.5}
+                fill="rgba(255, 255, 255, 0.18)"
+              />
+            </pattern>
+          </defs>
+
+          {/* Void Background */}
+          <rect width="100%" height="100%" fill="var(--void)" />
+
+          {/* Dot Grids */}
+          {showGrid && (
+            <>
+              <rect width="100%" height="100%" fill="url(#minorDotGrid)" pointerEvents="none" />
+              <rect width="100%" height="100%" fill="url(#majorDotGrid)" pointerEvents="none" />
+            </>
           )}
+
+          {/* Content Group (Pan & Zoom Transformed) */}
+          <g transform={`translate(${pan.x}, ${pan.y}) scale(${scale})`}>
+            <CircuitContent
+              components={components}
+              wires={wires}
+              routedWireMap={routedWireMap}
+              selectedIds={selectedIds}
+              selectedWireId={selectedWireId}
+              highlightedId={highlightedId}
+              findings={findings}
+              hintHighlight={hintHighlight}
+              hintLevel={hintLevel}
+              simResult={simResult}
+              isSimulating={isSimulating}
+              drawingOrigin={drawingWire ? { compId: drawingWire.fromId, pinIdx: drawingWire.fromPin } : null}
+              activeTool={activeTool}
+              showPinLabels={showPinLabels}
+              isSpacePressed={isSpacePressed}
+              onComponentPointerDown={handleComponentPointerDown}
+              onPinClick={handlePinClick}
+              onWirePointerDown={handleWirePointerDown}
+            />
+
+            {/* Wire T-Junction Snap Preview Dot */}
+            {hoveredWireSnap && (activeTool === 'wire' || drawingWire) && (
+              <g className="wire-junction-preview" pointerEvents="none">
+                <circle
+                  cx={hoveredWireSnap.x}
+                  cy={hoveredWireSnap.y}
+                  r="7"
+                  fill="rgba(10, 132, 255, 0.22)"
+                  stroke="var(--blue)"
+                  strokeWidth="1.2"
+                />
+                <circle
+                  cx={hoveredWireSnap.x}
+                  cy={hoveredWireSnap.y}
+                  r="3.2"
+                  fill="var(--blue)"
+                  stroke="#FFFFFF"
+                  strokeWidth="1"
+                />
+              </g>
+            )}
+
+            {/* Magnetic Pin Snap Ring Indicator */}
+            {hoveredPinSnap && (activeTool === 'wire' || drawingWire) && (
+              <g className="pin-snap-preview" pointerEvents="none">
+                <circle
+                  cx={hoveredPinSnap.x}
+                  cy={hoveredPinSnap.y}
+                  r="12"
+                  fill="rgba(100, 210, 255, 0.15)"
+                  stroke="#64D2FF"
+                  strokeWidth="2"
+                  strokeDasharray="4 2"
+                  style={{ filter: 'drop-shadow(0 0 3px rgba(100, 210, 255, 0.4))' }}
+                />
+                <circle
+                  cx={hoveredPinSnap.x}
+                  cy={hoveredPinSnap.y}
+                  r="4.5"
+                  fill="#64D2FF"
+                  stroke="#FFFFFF"
+                  strokeWidth="1.5"
+                />
+              </g>
+            )}
+
+            {/* Active Orthogonal Wire Drawing Rubberband Line */}
+            {drawingWire && (
+              <g className="rubberband-wire" pointerEvents="none">
+                <path
+                  d={(() => {
+                    const mx = Math.round((drawingWire.startX + drawingWire.currentX) / 2);
+                    return `M ${drawingWire.startX},${drawingWire.startY} L ${mx},${drawingWire.startY} L ${mx},${drawingWire.currentY} L ${drawingWire.currentX},${drawingWire.currentY}`;
+                  })()}
+                  fill="none"
+                  stroke="var(--blue)"
+                  strokeWidth="2.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeDasharray="6 4"
+                />
+                <circle
+                  cx={drawingWire.startX}
+                  cy={drawingWire.startY}
+                  r="3.5"
+                  fill="var(--blue)"
+                />
+                <circle
+                  cx={drawingWire.currentX}
+                  cy={drawingWire.currentY}
+                  r="4.5"
+                  fill="var(--blue)"
+                  stroke="#FFFFFF"
+                  strokeWidth="1.5"
+                  style={{ filter: 'drop-shadow(0 0 3px var(--blue))' }}
+                />
+              </g>
+            )}
 
           {/* Marquee Selection Rectangle */}
           {marquee && (
@@ -713,9 +1215,10 @@ export default function Canvas({
             </g>
           )}
         </g>
-      </svg>
+        </svg>
+      </div>
 
-      {/* Floating Canvas Toolbar Pill */}
+      {/* Floating Canvas Toolbar Pill (outside SVG layer so pointer capture never steals clicks) */}
       <FloatingToolbar
         zoom={Math.round(zoom)}
         onZoomIn={() => setZoom((prev) => Math.min(400, prev + 25))}
@@ -724,6 +1227,7 @@ export default function Canvas({
           setZoom(100);
           setPan({ x: 60, y: 40 });
         }}
+        onZoomFit={handleZoomFit}
         ercCount={findings.length}
         onOpenErc={onOpenErc}
         activeTool={activeTool}
@@ -735,6 +1239,18 @@ export default function Canvas({
         isSimulating={isSimulating}
         onToggleSimulation={onToggleSimulation}
       />
+
+      {/* Live DC Simulation Readout Pill */}
+      {simResult && (
+        <div
+          className={`canvas-sim-readout glass sim-${simResult.severity}`}
+          role="status"
+          aria-live="polite"
+        >
+          <span className={`sim-readout-dot sim-dot-${simResult.severity}`} />
+          <span>{simResult.summary}</span>
+        </div>
+      )}
     </div>
   );
 }
@@ -742,85 +1258,93 @@ export default function Canvas({
 interface CircuitContentProps {
   components: PlacedComponent[];
   wires: WireConnection[];
+  routedWireMap: Map<string, RoutedWire>;
   selectedIds: string[];
   selectedWireId: string | null;
   highlightedId: string | null;
   findings: ErcFinding[];
+  hintHighlight: HintHighlight | null;
+  hintLevel: 1 | 2 | 3 | 4;
+  simResult: SimulationResult | null;
+  isSimulating: boolean;
   drawingOrigin: { compId: string; pinIdx: number } | null;
+  activeTool: 'select' | 'pan' | 'wire';
+  showPinLabels: boolean;
   isSpacePressed: boolean;
   onComponentPointerDown: (e: React.PointerEvent, comp: PlacedComponent) => void;
   onPinClick: (e: React.PointerEvent, comp: PlacedComponent, pinIdx: number) => void;
-  onSelectWire: (wireId: string) => void;
+  onWirePointerDown: (e: React.PointerEvent, wireId: string) => void;
 }
 
 const CircuitContent = memo(function CircuitContent({
   components,
   wires,
+  routedWireMap,
   selectedIds,
   selectedWireId,
   highlightedId,
   findings,
+  hintHighlight,
+  hintLevel,
+  simResult,
+  isSimulating,
   drawingOrigin,
+  activeTool,
+  showPinLabels,
   isSpacePressed,
   onComponentPointerDown,
   onPinClick,
-  onSelectWire,
+  onWirePointerDown,
 }: CircuitContentProps) {
   const findingAnchors = useMemo(() => new Set(findings.map((f) => f.anchorId)), [findings]);
+  const activeWireSet = useMemo(
+    () => new Set(simResult?.activeWireIds ?? []),
+    [simResult]
+  );
 
   return (
     <>
-      {/* Wires with rounded line-caps, junction dots, and blue selection glow */}
+      {/* Wires rendered with orthogonal obstacle-avoiding paths */}
       {wires.map((wire) => {
-        const fromComp = components.find((c) => c.id === wire.fromId);
-        const toComp = components.find((c) => c.id === wire.toId);
-        if (!fromComp || !toComp) return null;
-
-        const fromPins = getPinPositions(fromComp.partId);
-        const toPins = getPinPositions(toComp.partId);
-        const p1 = fromPins[wire.fromPin] ?? { x: 0, y: 0 };
-        const p2 = toPins[wire.toPin] ?? { x: 0, y: 0 };
-
-        const x1 = fromComp.x + p1.x;
-        const y1 = fromComp.y + p1.y;
-        const x2 = toComp.x + p2.x;
-        const y2 = toComp.y + p2.y;
-
-        const midX = Math.round((x1 + x2) / 2);
-        const dPath = `M ${x1},${y1} L ${midX},${y1} L ${midX},${y2} L ${x2},${y2}`;
+        const routed = routedWireMap.get(wire.id);
+        if (!routed || !routed.dPath) return null;
+        const dPath = routed.dPath;
         const isSelected = selectedWireId === wire.id;
+        const isEnergized = activeWireSet.has(wire.id);
 
         return (
           <g
             key={wire.id}
+            id={`wire-group-${wire.id}`}
             className={`circuit-wire-group ${isSelected ? 'wire-selected' : ''}`}
-            onClick={(e) => {
-              e.stopPropagation();
-              onSelectWire(wire.id);
-            }}
+            onPointerDown={(e) => onWirePointerDown(e, wire.id)}
           >
-            {/* Generous Clickable Hit Target */}
+            {/* Generous Clickable Hit Target (24px wide for effortless clicking) */}
             <path
               d={dPath}
               fill="none"
-              stroke="transparent"
-              strokeWidth="16"
+              stroke="#FFFFFF"
+              strokeOpacity="0.001"
+              strokeWidth="24"
               strokeLinecap="round"
               strokeLinejoin="round"
-              style={{ cursor: 'pointer', pointerEvents: 'stroke' }}
+              style={{
+                cursor: activeTool === 'pan' ? 'grab' : activeTool === 'wire' || drawingOrigin ? 'crosshair' : 'pointer',
+                pointerEvents: activeTool === 'pan' ? 'none' : 'stroke',
+              }}
             />
 
-            {/* Selection Blue Glow under-layer */}
+            {/* Selection Subtle Accent Ring / Under-layer */}
             {isSelected && (
               <path
                 d={dPath}
                 fill="none"
-                stroke="var(--blue)"
-                strokeWidth="5"
+                stroke="#38BDF8"
+                strokeWidth="4"
                 strokeLinecap="round"
                 strokeLinejoin="round"
-                opacity="0.6"
-                style={{ filter: 'drop-shadow(0 0 6px var(--blue-glow))' }}
+                opacity="0.35"
+                style={{ filter: 'drop-shadow(0 0 2px rgba(56, 189, 248, 0.35))' }}
               />
             )}
 
@@ -832,17 +1356,45 @@ const CircuitContent = memo(function CircuitContent({
               strokeLinejoin="round"
             />
 
-            {/* Corner bend dots */}
-            <circle cx={midX} cy={y1} r="2.5" className={`wire-bend-dot net-${wire.netType}`} />
-            <circle cx={midX} cy={y2} r="2.5" className={`wire-bend-dot net-${wire.netType}`} />
-
-            {/* Waypoint handle when selected */}
-            {isSelected && (
-              <circle cx={midX} cy={Math.round((y1 + y2) / 2)} r="4" fill="var(--blue)" stroke="#FFFFFF" strokeWidth="1.5" />
+            {/* Subtle current flow pulse when simulation is active */}
+            {isEnergized && (
+              <path
+                d={dPath}
+                fill="none"
+                stroke={simResult?.severity === 'error' ? 'var(--error)' : 'var(--mentor)'}
+                strokeWidth="2.2"
+                strokeDasharray="6 6"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                opacity="0.8"
+                className="sim-current-flow"
+              />
             )}
+
+            {/* Terminal and waypoint handles when selected */}
+            {isSelected && routed.points.map((pt, pIdx) => (
+              <circle
+                key={pIdx}
+                cx={pt.x}
+                cy={pt.y}
+                r="3.5"
+                fill="#0A0B0E"
+                stroke="#38BDF8"
+                strokeWidth="1.5"
+                style={{ filter: 'drop-shadow(0 0 2px rgba(56, 189, 248, 0.3))' }}
+              />
+            ))}
           </g>
         );
       })}
+
+      {/* Socratic Visual Hint Layer (above wires, below pins & symbols) */}
+      <HintLayer
+        highlight={hintHighlight}
+        level={hintLevel}
+        components={components}
+        wires={wires}
+      />
 
       {/* Components */}
       {components.map((comp) => {
@@ -850,6 +1402,7 @@ const CircuitContent = memo(function CircuitContent({
         const isHighlighted = comp.id === highlightedId;
         const hasFinding = findingAnchors.has(comp.id);
         const finding = findings.find((f) => f.anchorId === comp.id);
+        const ledSim = simResult?.ledStates[comp.id];
 
         return (
           <g
@@ -862,15 +1415,70 @@ const CircuitContent = memo(function CircuitContent({
             tabIndex={0}
             aria-label={`${comp.designator} ${comp.name}`}
           >
+            {/* Simulated LED Glow */}
+            {ledSim && (ledSim.status === 'lit' || ledSim.status === 'overcurrent') && (
+              <circle
+                cx="0"
+                cy="0"
+                r={ledSim.status === 'overcurrent' ? 24 : 20}
+                fill={
+                  ledSim.status === 'overcurrent'
+                    ? 'rgba(255, 69, 58, 0.38)'
+                    : 'rgba(255, 95, 60, 0.32)'
+                }
+                style={{
+                  filter:
+                    ledSim.status === 'overcurrent'
+                      ? 'drop-shadow(0 0 12px var(--error))'
+                      : 'drop-shadow(0 0 10px rgba(255, 110, 64, 0.85))',
+                }}
+                pointerEvents="none"
+              />
+            )}
+            {/* Simulated LED Current & State Badge */}
+            {isSimulating && ledSim && (
+              <g className="canvas-current-badge" transform="translate(18, -14)" pointerEvents="none">
+                <rect
+                  x="-3"
+                  y="-10"
+                  width={ledSim.currentMa >= 100 ? 54 : 46}
+                  height="14"
+                  rx="3"
+                  fill="rgba(10, 11, 14, 0.9)"
+                  stroke={ledSim.status === 'overcurrent' ? 'var(--error)' : 'rgba(0, 113, 227, 0.5)'}
+                  strokeWidth="1"
+                />
+                <text
+                  x="2"
+                  y="0"
+                  fill={ledSim.status === 'overcurrent' ? 'var(--error)' : 'var(--text-1)'}
+                  fontSize="9"
+                  fontFamily="var(--font-mono)"
+                  fontWeight="600"
+                >
+                  {ledSim.status === 'reversed' ? 'REV' : `${ledSim.currentMa.toFixed(1)} mA`}
+                </text>
+              </g>
+            )}
             {/* Generous Hit Area */}
-            <rect
-              x="-35"
-              y="-25"
-              width="70"
-              height="50"
-              fill="transparent"
-              style={{ pointerEvents: 'all', cursor: isSpacePressed ? 'grab' : 'move' }}
-            />
+            {comp.partId === 'junction' ? (
+              <circle
+                cx="0"
+                cy="0"
+                r="14"
+                fill="transparent"
+                style={{ pointerEvents: 'all', cursor: isSpacePressed ? 'grab' : 'move' }}
+              />
+            ) : (
+              <rect
+                x="-35"
+                y="-25"
+                width="70"
+                height="50"
+                fill="transparent"
+                style={{ pointerEvents: 'all', cursor: isSpacePressed ? 'grab' : 'move' }}
+              />
+            )}
 
             {/* Selection Blue Halo */}
             {isSelected && (
@@ -923,12 +1531,19 @@ const CircuitContent = memo(function CircuitContent({
             </g>
 
             {/* Component Pins with 20px generous hit targets */}
-            {renderPins(comp, onPinClick, drawingOrigin)}
+            {renderPins(
+              comp,
+              onPinClick,
+              drawingOrigin,
+              showPinLabels && (activeTool === 'wire' || Boolean(drawingOrigin) || isSelected)
+            )}
 
             {/* Component Identifier */}
-            <text y="28" textAnchor="middle" className="component-identifier-text">
-              {comp.designator}
-            </text>
+            {comp.partId !== 'junction' && (
+              <text y="28" textAnchor="middle" className="component-identifier-text">
+                {comp.designator}
+              </text>
+            )}
           </g>
         );
       })}
@@ -942,8 +1557,8 @@ function renderSymbol(comp: PlacedComponent, isAura: boolean = false) {
   const strokeW = isAura ? 2.5 : 1.5;
   const auraStyle = isAura
     ? {
-        filter: 'drop-shadow(0 0 6px var(--blue)) drop-shadow(0 0 12px var(--blue-glow))',
-        opacity: 0.95,
+        filter: 'drop-shadow(0 0 3px rgba(0, 113, 227, 0.4))',
+        opacity: 0.7,
       }
     : undefined;
 
@@ -1047,18 +1662,23 @@ function renderSymbol(comp: PlacedComponent, isAura: boolean = false) {
           <line x1="10" y1="0" x2="20" y2="0" stroke={strokeColor} strokeWidth={strokeW} />
         </g>
       );
-    case 'pushbutton':
+    case 'pushbutton': {
+      const isClosed = (comp.params.state ?? 'closed') === 'closed';
       return (
         <g className="component-body" style={auraStyle}>
           <circle cx="-10" cy="4" r="2.5" fill="none" stroke={strokeColor} strokeWidth={strokeW} />
           <circle cx="10" cy="4" r="2.5" fill="none" stroke={strokeColor} strokeWidth={strokeW} />
           <line x1="-20" y1="4" x2="-12.5" y2="4" stroke={strokeColor} strokeWidth={strokeW} />
           <line x1="12.5" y1="4" x2="20" y2="4" stroke={strokeColor} strokeWidth={strokeW} />
-          <line x1="-10" y1="-3" x2="10" y2="-3" stroke={strokeColor} strokeWidth={isAura ? 3 : 2} />
-          <line x1="0" y1="-3" x2="0" y2="-12" stroke={strokeColor} strokeWidth={strokeW} />
+          <line x1="-10" y1={isClosed ? 4 : -3} x2="10" y2={isClosed ? 4 : -3} stroke={strokeColor} strokeWidth={isAura ? 3 : 2} />
+          <line x1="0" y1={isClosed ? 4 : -3} x2="0" y2={isClosed ? -6 : -12} stroke={strokeColor} strokeWidth={strokeW} />
         </g>
       );
-    case 'potentiometer':
+    }
+    case 'potentiometer': {
+      const rawWiper = comp.params.wiper !== undefined ? Number(comp.params.wiper) : 50;
+      const wiper = Math.max(0, Math.min(100, Number.isFinite(rawWiper) ? rawWiper : 50));
+      const arrowX = Math.round(-12 + (wiper / 100) * 24);
       return (
         <g className="component-body" style={auraStyle}>
           <path
@@ -1069,20 +1689,27 @@ function renderSymbol(comp: PlacedComponent, isAura: boolean = false) {
             strokeLinecap="round"
             strokeLinejoin="round"
           />
-          <line x1="0" y1="-14" x2="0" y2="-4" stroke={strokeColor} strokeWidth={strokeW} />
-          <polyline points="-3,-7 0,-4 3,-7" fill="none" stroke={strokeColor} strokeWidth={strokeW} />
+          <line x1={arrowX} y1="-14" x2={arrowX} y2="-4" stroke={strokeColor} strokeWidth={strokeW} />
+          <polyline points={`${arrowX - 3},-7 ${arrowX},-4 ${arrowX + 3},-7`} fill="none" stroke={strokeColor} strokeWidth={strokeW} />
         </g>
       );
-    case 'switch.spst':
+    }
+    case 'switch.spst': {
+      const isClosed = (comp.params.state ?? 'closed') === 'closed';
       return (
         <g className="component-body" style={auraStyle}>
           <circle cx="-10" cy="4" r="2.5" fill="none" stroke={strokeColor} strokeWidth={strokeW} />
           <circle cx="10" cy="4" r="2.5" fill="none" stroke={strokeColor} strokeWidth={strokeW} />
           <line x1="-20" y1="4" x2="-12.5" y2="4" stroke={strokeColor} strokeWidth={strokeW} />
           <line x1="12.5" y1="4" x2="20" y2="4" stroke={strokeColor} strokeWidth={strokeW} />
-          <line x1="-8" y1="2" x2="8" y2="-8" stroke={strokeColor} strokeWidth={isAura ? 3 : 2} strokeLinecap="round" />
+          {isClosed ? (
+            <line x1="-10" y1="4" x2="10" y2="4" stroke={strokeColor} strokeWidth={isAura ? 3 : 2} strokeLinecap="round" />
+          ) : (
+            <line x1="-8" y1="2" x2="8" y2="-8" stroke={strokeColor} strokeWidth={isAura ? 3 : 2} strokeLinecap="round" />
+          )}
         </g>
       );
+    }
     case 'transistor.npn':
       return (
         <g className="component-body" style={auraStyle}>
@@ -1128,6 +1755,19 @@ function renderSymbol(comp: PlacedComponent, isAura: boolean = false) {
           <line x1="-28" y1="8" x2="28" y2="8" stroke={strokeColor} strokeDasharray="2 3" strokeWidth="1" opacity="0.6" />
         </g>
       );
+    case 'junction':
+      return (
+        <g className="component-body" style={auraStyle}>
+          <circle
+            cx="0"
+            cy="0"
+            r={isAura ? 7 : 4.5}
+            fill={isAura ? 'var(--blue)' : '#52A8FF'}
+            stroke="#05070B"
+            strokeWidth="1.5"
+          />
+        </g>
+      );
     default:
       return (
         <g className="component-body" style={auraStyle}>
@@ -1141,13 +1781,16 @@ function renderSymbol(comp: PlacedComponent, isAura: boolean = false) {
 function renderPins(
   comp: PlacedComponent,
   onPinClick: (e: React.PointerEvent, comp: PlacedComponent, pinIdx: number) => void,
-  drawingOrigin: { compId: string; pinIdx: number } | null
+  drawingOrigin: { compId: string; pinIdx: number } | null,
+  showLabels: boolean = false
 ) {
-  const pinPositions = getPinPositions(comp.partId);
+  const pinPositions = getPinLocalPositions(comp.partId);
+  const meta = showLabels && comp.partId !== 'junction' ? getPartMeta(comp.partId) : null;
   return (
     <g>
       {pinPositions.map((pin, i) => {
         const isOrigin = drawingOrigin?.compId === comp.id && drawingOrigin?.pinIdx === i;
+        const pinMeta = meta?.pins[i];
         return (
           <g
             key={i}
@@ -1168,6 +1811,17 @@ function renderPins(
               cy={pin.y}
               className={`circuit-pin ${isOrigin ? 'pin-active' : ''}`}
             />
+            {/* Optional pin role callout */}
+            {showLabels && pinMeta && (
+              <text
+                x={pin.x}
+                y={pin.y - 7}
+                textAnchor="middle"
+                className="pin-role-callout"
+              >
+                {pinMeta.name}
+              </text>
+            )}
           </g>
         );
       })}
@@ -1175,39 +1829,7 @@ function renderPins(
   );
 }
 
-export function getPinPositions(partId: string): Array<{ x: number; y: number }> {
-  switch (partId) {
-    case 'resistor.axial':
-      return [{ x: -30, y: 0 }, { x: 30, y: 0 }];
-    case 'led.5mm.red':
-      return [{ x: -20, y: 0 }, { x: 24, y: 0 }];
-    case 'capacitor.ceramic':
-      return [{ x: -20, y: 0 }, { x: 20, y: 0 }];
-    case 'battery.9v':
-      return [{ x: 0, y: -20 }, { x: 0, y: 20 }];
-    case 'battery.3v':
-      return [{ x: 0, y: -16 }, { x: 0, y: 16 }];
-    case 'ground':
-      return [{ x: 0, y: -12 }];
-    case 'diode.1n4007':
-      return [{ x: -20, y: 0 }, { x: 20, y: 0 }];
-    case 'pushbutton':
-      return [{ x: -20, y: 4 }, { x: 20, y: 4 }];
-    case 'potentiometer':
-      return [{ x: -20, y: 4 }, { x: 0, y: -14 }, { x: 20, y: 4 }];
-    case 'switch.spst':
-      return [{ x: -20, y: 4 }, { x: 20, y: 4 }];
-    case 'transistor.npn':
-      return [{ x: -16, y: 0 }, { x: 10, y: -12 }, { x: 10, y: 12 }];
-    case 'motor.dc':
-      return [{ x: 0, y: -20 }, { x: 0, y: 20 }];
-    case 'servo':
-      return [{ x: -18, y: 0 }, { x: 0, y: 12 }, { x: 18, y: 0 }];
-    case 'sensor.ultrasonic':
-      return [{ x: -18, y: 14 }, { x: -6, y: 14 }, { x: 6, y: 14 }, { x: 18, y: 14 }];
-    case 'arduino.uno':
-      return [{ x: -32, y: -12 }, { x: -32, y: 12 }, { x: 32, y: -12 }, { x: 32, y: 12 }];
-    default:
-      return [{ x: -20, y: 0 }, { x: 20, y: 0 }];
-  }
-}
+export {
+  computeRotatedPinWorld as getRotatedPinWorldPos,
+  getPinLocalPositions as getPinPositions,
+};

@@ -39,10 +39,17 @@ export const SHORTCUTS: ShortcutItem[] = [
     keys: { mac: 'V', win: 'V' },
   },
   {
+    id: 'tool.pan',
+    category: 'Tools',
+    label: 'Pan Tool (Toggle)',
+    description: 'Hand tool for panning around canvas; press H again to return to Select',
+    keys: { mac: 'H', win: 'H' },
+  },
+  {
     id: 'tool.wire',
     category: 'Tools',
-    label: 'Wire Tool',
-    description: 'Crosshair tool for drawing electrical wire connections',
+    label: 'Wire Tool (Toggle)',
+    description: 'Crosshair tool for wiring electrical nets; press W again to return to Select',
     keys: { mac: 'W', win: 'W' },
   },
 
@@ -88,6 +95,27 @@ export const SHORTCUTS: ShortcutItem[] = [
     label: 'Place Earth Ground',
     description: 'Ghost preview follows cursor; click canvas to place',
     keys: { mac: 'G', win: 'G' },
+  },
+  {
+    id: 'place.pushbutton',
+    category: 'Quick-Place',
+    label: 'Place Pushbutton',
+    description: 'Ghost preview follows cursor; click canvas to place (press P again to cancel)',
+    keys: { mac: 'P', win: 'P' },
+  },
+  {
+    id: 'place.switch',
+    category: 'Quick-Place',
+    label: 'Place SPST Slide Switch',
+    description: 'Ghost preview follows cursor; click canvas to place (press S again to cancel)',
+    keys: { mac: 'S', win: 'S' },
+  },
+  {
+    id: 'place.junction',
+    category: 'Quick-Place',
+    label: 'Place Wire Junction',
+    description: 'Ghost preview follows cursor; click canvas to place (press J again to cancel)',
+    keys: { mac: 'J', win: 'J' },
   },
 
   // Editing

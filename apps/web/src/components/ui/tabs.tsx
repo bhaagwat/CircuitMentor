@@ -103,7 +103,7 @@ const TabsContent = React.forwardRef<HTMLDivElement, TabsContentProps>(
         role="tabpanel"
         data-state={isActive ? 'active' : 'inactive'}
         className={cn(
-          'flex-1 outline-none overflow-y-auto animate-in fade-in-0 duration-150',
+          'flex-1 min-h-0 outline-none overflow-y-auto animate-in fade-in-0 duration-150',
           className
         )}
         {...props}

@@ -2,12 +2,14 @@ import * as React from 'react';
 import { cn, cva, type VariantProps } from '@/lib/utils';
 
 const buttonVariants = cva(
-  'inline-flex items-center justify-center whitespace-nowrap rounded-[var(--cm-r-sm)] text-[13px] font-medium transition-all duration-[var(--d-press)] ease-[var(--ease-spring)] focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-[var(--cm-blue)] focus-visible:ring-opacity-50 disabled:pointer-events-none disabled:opacity-50 active:scale-[0.97] cursor-pointer shadow-[inset_0_1px_0_rgba(255,255,255,0.07)]',
+  'inline-flex items-center justify-center whitespace-nowrap rounded-xl text-[13px] font-semibold transition-all duration-150 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:pointer-events-none disabled:opacity-50 active:scale-[0.985] cursor-pointer select-none',
   {
     variants: {
       variant: {
         default:
-          'bg-[var(--cm-blue)] text-[#FFFFFF] shadow-[inset_0_1px_0_rgba(255,255,255,0.2)] hover:bg-[var(--blue-hover)]',
+          'btn-accent-blue',
+        accent:
+          'btn-accent-blue',
         destructive:
           'bg-[var(--cm-error)] text-[#FFFFFF] hover:bg-opacity-90',
         outline:
@@ -21,11 +23,11 @@ const buttonVariants = cva(
           'bg-[var(--glass-fill)] backdrop-blur-[20px] saturate-[160%] border border-[var(--glass-stroke)] text-[var(--cm-text)] shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_8px_32px_rgba(0,0,0,0.5)] hover:bg-[var(--cm-hover)]',
       },
       size: {
-        default: 'h-[var(--cm-control-h)] px-3.5 py-1.5',
-        sm: 'h-7 rounded-[var(--cm-r-xs)] px-2.5 text-xs',
-        lg: 'h-10 rounded-[var(--cm-r-md)] px-5 text-sm',
-        icon: 'h-8 w-8 rounded-[var(--cm-r-sm)]',
-        pill: 'h-8 rounded-[var(--cm-r-pill)] px-4',
+        default: 'h-9 px-4 py-1.5 text-xs',
+        sm: 'h-8 rounded-lg px-3 text-xs',
+        lg: 'h-11 rounded-xl px-6 text-sm',
+        icon: 'h-8 w-8 rounded-xl',
+        pill: 'h-8 rounded-full px-4 text-xs',
       },
     },
     defaultVariants: {
@@ -35,11 +37,10 @@ const buttonVariants = cva(
   }
 );
 
-export interface ButtonProps
-  extends React.ButtonHTMLAttributes<HTMLButtonElement>,
-    VariantProps<typeof buttonVariants> {
-  asChild?: boolean;
-}
+export type ButtonProps = React.ButtonHTMLAttributes<HTMLButtonElement> &
+  VariantProps<typeof buttonVariants> & {
+    asChild?: boolean;
+  };
 
 const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
   ({ className, variant, size, ...props }, ref) => {

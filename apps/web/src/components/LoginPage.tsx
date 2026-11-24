@@ -1,18 +1,28 @@
-import React, { useEffect } from 'react';
 import LiveCircuitPreview from './LiveCircuitPreview';
+import CircuitMentorLogo from './ui/CircuitMentorLogo';
 
 interface LoginPageProps {
-  isAuthenticated: boolean;
-  onLoginSuccess: () => void;
   onNavigateHome: () => void;
 }
 
 export default function LoginPage({
-  onLoginSuccess,
   onNavigateHome,
 }: LoginPageProps) {
+  const isCancelled = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('error') === 'cancelled';
+
+  const handleGoogleSignIn = () => {
+    window.location.href = '/v1/auth/google/login';
+  };
+
   return (
     <div className="login-shell" role="region" aria-label="Sign in to CircuitMentor">
+      {/* Ambient Apple-style blur gradient orbs */}
+      <div className="login-ambient-bg" aria-hidden="true">
+        <div className="login-orb login-orb-1" />
+        <div className="login-orb login-orb-2" />
+        <div className="login-orb login-orb-3" />
+      </div>
+
       <div className="login-container">
         {/* Left Column: Form / Sign-in */}
         <div className="login-form-col">
@@ -26,13 +36,7 @@ export default function LoginPage({
               onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && onNavigateHome()}
               title="Return to CircuitMentor Home"
             >
-              <div className="login-brand-icon">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M12 2L2 7l10 5 10-5-10-5z" />
-                  <path d="M2 17l10 5 10-5" />
-                  <path d="M2 12l10 5 10-5" />
-                </svg>
-              </div>
+              <CircuitMentorLogo size={24} />
               <span className="login-brand-title">CircuitMentor</span>
             </div>
 
@@ -42,6 +46,11 @@ export default function LoginPage({
               <p className="login-subcopy">
                 Your projects sync automatically — pick up where you left off on any device you&apos;re signed into.
               </p>
+              {isCancelled && (
+                <div style={{ padding: '8px 12px', background: 'rgba(255, 69, 58, 0.15)', border: '1px solid var(--cm-err, #ff453a)', borderRadius: 'var(--cm-r-sm, 6px)', color: '#ff453a', fontSize: '13px', marginTop: '12px' }}>
+                  Google sign-in was cancelled or encountered an error. Please try again.
+                </div>
+              )}
             </div>
 
             {/* Single Official Google Identity Button */}
@@ -49,7 +58,7 @@ export default function LoginPage({
               <button
                 type="button"
                 className="google-signin-btn"
-                onClick={onLoginSuccess}
+                onClick={handleGoogleSignIn}
                 aria-label="Continue with Google"
               >
                 {/* Official Google 4-Color 'G' Logo */}

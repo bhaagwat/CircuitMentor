@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import {
   CommandDialog,
   CommandInput,
@@ -19,6 +19,7 @@ export interface CommandPaletteProps {
   context?: 'editor' | 'dashboard' | 'landing';
   // Editor actions
   onSelectPart?: (partId: string) => void;
+  onSelectTool?: (tool: 'select' | 'pan' | 'wire') => void;
   onRunSimulation?: () => void;
   onRunErc?: () => void;
   onSaveProject?: () => void;
@@ -69,6 +70,7 @@ export default function CommandPalette({
   onOpenChange,
   context = 'editor',
   onSelectPart,
+  onSelectTool,
   onRunSimulation,
   onRunErc,
   onSaveProject,
@@ -100,6 +102,44 @@ export default function CommandPalette({
 
   // Canvas Actions definitions
   const canvasActions = [
+    {
+      id: 'tool-select',
+      label: 'Select Tool (Pointer)',
+      shortcut: 'V',
+      icon: (
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M3 3l7 18 3-7 7-3L3 3z" />
+        </svg>
+      ),
+      perform: () => onSelectTool?.('select'),
+    },
+    {
+      id: 'tool-pan',
+      label: 'Pan Tool (Hand)',
+      shortcut: 'H',
+      icon: (
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M18 11V6a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v4" />
+          <path d="M14 10V4a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v7" />
+          <path d="M10 10.5V6a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v8" />
+          <path d="M6 14v-1.5a1.5 1.5 0 0 0-3 0v4.5a8 8 0 0 0 8 8h1a8 8 0 0 0 8-8v-5a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v2" />
+        </svg>
+      ),
+      perform: () => onSelectTool?.('pan'),
+    },
+    {
+      id: 'tool-wire',
+      label: 'Wire Tool (Crosshair)',
+      shortcut: 'W',
+      icon: (
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M4 20L20 4" />
+          <circle cx="4" cy="20" r="2" />
+          <circle cx="20" cy="4" r="2" />
+        </svg>
+      ),
+      perform: () => onSelectTool?.('wire'),
+    },
     {
       id: 'action-run-sim',
       label: 'Run Simulation',

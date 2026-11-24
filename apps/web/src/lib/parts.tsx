@@ -48,6 +48,7 @@ export const PARTS: PartDef[] = [
     name: 'Pushbutton',
     category: 'Basic',
     pins: 2,
+    shortcut: 'P',
     icon: (c) => (
       /* Open contact pushbutton schematic */
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.5" strokeLinecap="round">
@@ -95,6 +96,7 @@ export const PARTS: PartDef[] = [
     name: 'Slide Switch',
     category: 'Basic',
     pins: 3,
+    shortcut: 'S',
     icon: (c) => (
       /* SPST toggle switch schematic */
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.5" strokeLinecap="round">
@@ -260,6 +262,21 @@ export const PARTS: PartDef[] = [
       </svg>
     ),
   },
+  {
+    id: 'junction',
+    name: 'Wire Junction',
+    category: 'Basic',
+    pins: 1,
+    shortcut: 'J',
+    icon: (c) => (
+      /* Solder junction T-node schematic */
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.6">
+        <line x1="2" y1="12" x2="22" y2="12" />
+        <line x1="12" y1="12" x2="12" y2="22" />
+        <circle cx="12" cy="12" r="3.5" fill={c} />
+      </svg>
+    ),
+  },
 ];
 
 export const QUICK_PLACE_PARTS: Record<string, string> = {
@@ -269,47 +286,224 @@ export const QUICK_PLACE_PARTS: Record<string, string> = {
   b: 'battery.9v',
   u: 'arduino.uno',
   g: 'ground',
+  j: 'junction',
 };
 
 export function getPartById(id: string): PartDef | undefined {
   return PARTS.find((p) => p.id === id);
 }
 
-export function getPartMeta(partId: string): { prefix: string; name: string; params: Record<string, string> } {
+export type PinRole = 'vcc' | 'gnd' | 'anode' | 'cathode' | 'io' | 'passive';
+
+export interface PartPin {
+  id: string | number;
+  name: string;
+  role: PinRole;
+  required?: boolean;
+}
+
+export interface PartMeta {
+  prefix: string;
+  name: string;
+  params: Record<string, string>;
+  defaultParams: Record<string, string>;
+  pins: PartPin[];
+}
+
+export function getPartMeta(partId: string): PartMeta {
+  let meta: { prefix: string; name: string; params: Record<string, string>; pins: PartPin[] };
   switch (partId) {
     case 'resistor.axial':
-      return { prefix: 'R', name: 'Resistor', params: { resistance: '1 kΩ', tolerance: '5 %' } };
+      meta = {
+        prefix: 'R',
+        name: 'Resistor',
+        params: { resistance: '1 kΩ', tolerance: '5 %' },
+        pins: [
+          { id: 0, name: '1', role: 'passive' },
+          { id: 1, name: '2', role: 'passive' },
+        ],
+      };
+      break;
     case 'led.5mm.red':
-      return { prefix: 'D', name: 'LED (Red 5mm)', params: { color: 'Red', forward_voltage: '2.0 V', max_current: '20 mA' } };
+      meta = {
+        prefix: 'D',
+        name: 'LED (Red 5mm)',
+        params: { color: 'Red', forward_voltage: '2.0 V', max_current: '20 mA' },
+        pins: [
+          { id: 0, name: 'anode', role: 'anode', required: true },
+          { id: 1, name: 'cathode', role: 'cathode', required: true },
+        ],
+      };
+      break;
     case 'capacitor.ceramic':
-      return { prefix: 'C', name: 'Capacitor', params: { capacitance: '100 nF' } };
+      meta = {
+        prefix: 'C',
+        name: 'Capacitor',
+        params: { capacitance: '100 nF' },
+        pins: [
+          { id: 0, name: '1', role: 'passive' },
+          { id: 1, name: '2', role: 'passive' },
+        ],
+      };
+      break;
     case 'potentiometer':
-      return { prefix: 'RV', name: 'Potentiometer', params: { resistance: '10 kΩ' } };
+      meta = {
+        prefix: 'RV',
+        name: 'Potentiometer',
+        params: { resistance: '10 kΩ' },
+        pins: [
+          { id: 0, name: '1', role: 'passive' },
+          { id: 1, name: 'wiper', role: 'passive' },
+          { id: 2, name: '2', role: 'passive' },
+        ],
+      };
+      break;
     case 'pushbutton':
-      return { prefix: 'SW', name: 'Pushbutton', params: {} };
+      meta = {
+        prefix: 'SW',
+        name: 'Pushbutton',
+        params: {},
+        pins: [
+          { id: 0, name: '1', role: 'passive' },
+          { id: 1, name: '2', role: 'passive' },
+        ],
+      };
+      break;
     case 'switch.spst':
-      return { prefix: 'SW', name: 'Slide Switch', params: {} };
+      meta = {
+        prefix: 'SW',
+        name: 'Slide Switch',
+        params: {},
+        pins: [
+          { id: 0, name: '1', role: 'passive' },
+          { id: 1, name: '2', role: 'passive' },
+        ],
+      };
+      break;
     case 'battery.9v':
-      return { prefix: 'V', name: '9V Battery', params: { voltage: '9 V' } };
+      meta = {
+        prefix: 'V',
+        name: '9V Battery',
+        params: { voltage: '9 V' },
+        pins: [
+          { id: 0, name: '+', role: 'vcc', required: true },
+          { id: 1, name: '−', role: 'gnd', required: true },
+        ],
+      };
+      break;
     case 'battery.3v':
-      return { prefix: 'V', name: 'Coin Cell 3V', params: { voltage: '3 V' } };
+      meta = {
+        prefix: 'V',
+        name: 'Coin Cell 3V',
+        params: { voltage: '3 V' },
+        pins: [
+          { id: 0, name: '+', role: 'vcc', required: true },
+          { id: 1, name: '−', role: 'gnd', required: true },
+        ],
+      };
+      break;
     case 'ground':
-      return { prefix: 'GND', name: 'Earth Ground', params: {} };
+      meta = {
+        prefix: 'GND',
+        name: 'Earth Ground',
+        params: {},
+        pins: [{ id: 0, name: 'GND', role: 'gnd', required: true }],
+      };
+      break;
     case 'diode.1n4007':
-      return { prefix: 'D', name: 'Diode (1N4007)', params: { type: 'Rectifier' } };
+      meta = {
+        prefix: 'D',
+        name: 'Diode (1N4007)',
+        params: { type: 'Rectifier' },
+        pins: [
+          { id: 0, name: 'anode', role: 'anode' },
+          { id: 1, name: 'cathode', role: 'cathode' },
+        ],
+      };
+      break;
     case 'transistor.npn':
-      return { prefix: 'Q', name: 'NPN Transistor', params: { model: '2N2222' } };
+      meta = {
+        prefix: 'Q',
+        name: 'NPN Transistor',
+        params: { model: '2N2222' },
+        pins: [
+          { id: 0, name: 'B', role: 'io' },
+          { id: 1, name: 'C', role: 'io' },
+          { id: 2, name: 'E', role: 'io' },
+        ],
+      };
+      break;
     case 'arduino.uno':
-      return { prefix: 'U', name: 'Arduino Uno R3', params: { mcu: 'ATmega328P', clock: '16 MHz' } };
+      meta = {
+        prefix: 'U',
+        name: 'Arduino Uno R3',
+        params: { mcu: 'ATmega328P', clock: '16 MHz' },
+        pins: [
+          { id: 0, name: '5V', role: 'vcc' },
+          { id: 1, name: 'GND', role: 'gnd' },
+          { id: 2, name: 'D13', role: 'io' },
+          { id: 3, name: 'A0', role: 'io' },
+        ],
+      };
+      break;
     case 'breadboard.small':
-      return { prefix: 'BB', name: 'Breadboard Half', params: {} };
+      meta = { prefix: 'BB', name: 'Breadboard Half', params: {}, pins: [] };
+      break;
     case 'motor.dc':
-      return { prefix: 'M', name: 'DC Motor', params: { voltage: '5 V' } };
+      meta = {
+        prefix: 'M',
+        name: 'DC Motor',
+        params: { voltage: '5 V' },
+        pins: [
+          { id: 0, name: '+', role: 'passive' },
+          { id: 1, name: '−', role: 'passive' },
+        ],
+      };
+      break;
     case 'servo':
-      return { prefix: 'M', name: 'Micro Servo 9g', params: { control: 'PWM' } };
+      meta = {
+        prefix: 'M',
+        name: 'Micro Servo 9g',
+        params: { control: 'PWM' },
+        pins: [
+          { id: 0, name: 'GND', role: 'gnd', required: true },
+          { id: 1, name: 'VCC', role: 'vcc', required: true },
+          { id: 2, name: 'PWM', role: 'io' },
+        ],
+      };
+      break;
     case 'sensor.ultrasonic':
-      return { prefix: 'S', name: 'HC-SR04 Ultrasonic', params: { trigger: 'D9', echo: 'D10' } };
+      meta = {
+        prefix: 'S',
+        name: 'HC-SR04 Ultrasonic',
+        params: { trigger: 'D9', echo: 'D10' },
+        pins: [
+          { id: 0, name: 'VCC', role: 'vcc', required: true },
+          { id: 1, name: 'Trig', role: 'io' },
+          { id: 2, name: 'Echo', role: 'io' },
+          { id: 3, name: 'GND', role: 'gnd', required: true },
+        ],
+      };
+      break;
+    case 'junction':
+      meta = {
+        prefix: 'J',
+        name: 'Wire Junction',
+        params: {},
+        pins: [{ id: 0, name: 'node', role: 'passive' }],
+      };
+      break;
     default:
-      return { prefix: 'X', name: 'Component', params: {} };
+      meta = {
+        prefix: 'X',
+        name: 'Component',
+        params: {},
+        pins: [
+          { id: 0, name: '1', role: 'passive' },
+          { id: 1, name: '2', role: 'passive' },
+        ],
+      };
+      break;
   }
+  return { ...meta, defaultParams: meta.params };
 }

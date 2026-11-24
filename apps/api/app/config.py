@@ -1,28 +1,74 @@
 """CircuitMentor API — configuration via environment variables."""
 
+import warnings
+from pathlib import Path
 from pydantic_settings import BaseSettings
+
+_REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
 class Settings(BaseSettings):
     # Database
     DATABASE_URL: str = "postgresql+asyncpg://circuitmentor:circuitmentor@localhost:5432/circuitmentor"
 
-    # Redis
-    REDIS_URL: str = "redis://localhost:6379/0"
-
     # Auth
     JWT_SECRET: str = "change-me-to-a-random-secret-in-production"
     JWT_ALGORITHM: str = "HS256"
     JWT_EXPIRE_MINUTES: int = 1440  # 24 hours
 
+    # Google OAuth
+    google_client_id: str = "placeholder-client-id"
+    google_client_secret: str = "placeholder-client-secret"
+    google_redirect_uri: str = "http://localhost:5173/v1/auth/google/callback"
+    web_url: str = "http://localhost:5173"
+    cookie_secure: bool = False
+    rate_limit_enabled: bool = True
+
+    # AI Mentor (OpenRouter / Anthropic)
+    openrouter_api_key: str = ""
+    openrouter_base_url: str = "https://openrouter.ai/api/v1"
+    anthropic_api_key: str = ""
+    mentor_model: str = "anthropic/claude-3.5-haiku"
+
     # CORS
-    CORS_ORIGINS: str = "http://localhost:5173,http://localhost:3000"
+    CORS_ORIGINS: str = (
+        "http://localhost:5173,http://localhost:5174,http://127.0.0.1:5173,http://127.0.0.1:5174,http://localhost:3000,http://127.0.0.1:3000"
+    )
 
     @property
     def cors_origins_list(self) -> list[str]:
-        return [o.strip() for o in self.CORS_ORIGINS.split(",")]
+        configured = [o.strip() for o in self.CORS_ORIGINS.split(",") if o.strip()]
+        defaults = [
+            "http://localhost:5173",
+            "http://localhost:5174",
+            "http://127.0.0.1:5173",
+            "http://127.0.0.1:5174",
+            "http://localhost:3000",
+            "http://127.0.0.1:3000",
+        ]
+        return list(dict.fromkeys(configured + defaults))
 
-    model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
+    model_config = {
+        "env_file": [
+            _REPO_ROOT / ".env",
+            _REPO_ROOT / "apps" / "api" / ".env",
+            ".env",
+            "apps/api/.env",
+            "../.env",
+        ],
+        "env_file_encoding": "utf-8",
+        "extra": "ignore",
+    }
 
 
 settings = Settings()
+
+if settings.JWT_SECRET == "change-me-to-a-random-secret-in-production":
+    if settings.cookie_secure:
+        raise ValueError(
+            "CRITICAL: JWT_SECRET must be changed from the default in production (cookie_secure=True)."
+        )
+    warnings.warn(
+        "JWT_SECRET is using the insecure default value. Set a strong secret in .env before deploying to production.",
+        stacklevel=2,
+    )

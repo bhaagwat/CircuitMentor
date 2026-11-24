@@ -18,6 +18,12 @@ __pycache__/
 venv/
 *.egg-info/
 
+# Database
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+
 # Docker volumes
 pgdata/
 redisdata/

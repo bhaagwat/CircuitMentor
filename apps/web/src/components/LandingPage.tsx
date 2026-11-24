@@ -1,6 +1,7 @@
 import React, { useState, useCallback } from 'react';
 import LiveCircuitPreview from './LiveCircuitPreview';
 import { Sheet, SheetTrigger, SheetContent } from './ui/sheet';
+import CircuitMentorLogo from './ui/CircuitMentorLogo';
 
 interface LandingPageProps {
   onOpenApp: () => void;
@@ -16,12 +17,8 @@ function WorkspaceShellDemo() {
       {/* Far-left icon rail */}
       <div className="landing-mock-rail">
         {/* Logo mark */}
-        <div className="mock-rail-logo">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M12 2L2 7l10 5 10-5-10-5z" />
-            <path d="M2 17l10 5 10-5" />
-            <path d="M2 12l10 5 10-5" />
-          </svg>
+        <div className="mock-rail-logo flex items-center justify-center">
+          <CircuitMentorLogo size={18} />
         </div>
         <div className="mock-rail-divider" />
         {/* Library icon */}
@@ -276,15 +273,30 @@ export default function LandingPage({
     }
   }, []);
 
-  const handlePrimaryAction = useCallback(() => {
-    if (isAuthenticated) {
-      onOpenApp();
-    } else if (onOpenLogin) {
-      onOpenLogin();
+  const handleLogoClick = useCallback(() => {
+    setMobileMenuOpen(false);
+    const heroElem = document.getElementById('hero');
+    if (heroElem) {
+      const prefersReduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      heroElem.scrollIntoView({ behavior: prefersReduced ? 'auto' : 'smooth', block: 'start' });
     } else {
+      console.warn('[CircuitMentor Logo]: Target element #hero not found on Landing page. Falling back to window scroll.');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  }, []);
+
+  const handleGetStarted = useCallback(() => {
+    setMobileMenuOpen(false);
+    if (onOpenLogin) {
+      onOpenLogin();
+    } else if (onOpenApp) {
+      onOpenApp();
+    } else if (onOpenEditor) {
       onOpenEditor();
     }
-  }, [isAuthenticated, onOpenApp, onOpenLogin, onOpenEditor]);
+  }, [onOpenLogin, onOpenApp, onOpenEditor]);
+
+
 
   return (
     <div className="landing-container" role="region" aria-label="CircuitMentor Home">
@@ -292,20 +304,18 @@ export default function LandingPage({
       <div className="landing-navbar-wrapper">
         <header className="landing-navbar">
           <div className="landing-navbar-inner">
-            {/* Brand */}
+            {/* Brand - Smooth scrolls to #hero on landing page */}
             <div
               className="landing-brand"
-              onClick={isAuthenticated ? onOpenApp : onOpenEditor}
+              onClick={handleLogoClick}
               role="button"
               tabIndex={0}
-              onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && (isAuthenticated ? onOpenApp() : onOpenEditor())}
+              onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && handleLogoClick()}
               style={{ cursor: 'pointer', userSelect: 'none' }}
+              title="Scroll to top"
+              aria-label="CircuitMentor home - scroll to top"
             >
-              <div className="landing-brand-logo">
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M12 0C12 7.2 16.8 12 24 12C16.8 12 12 16.8 12 24C12 16.8 7.2 12 0 12C7.2 12 12 7.2 12 0Z" />
-                </svg>
-              </div>
+              <CircuitMentorLogo size={20} />
               <span className="landing-brand-name">CircuitMentor</span>
             </div>
 
@@ -324,7 +334,7 @@ export default function LandingPage({
               <button
                 type="button"
                 className="landing-nav-cta-white"
-                onClick={handlePrimaryAction}
+                onClick={handleGetStarted}
               >
                 <span>Get started</span>
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -349,12 +359,14 @@ export default function LandingPage({
                 <SheetContent side="right" className="landing-mobile-sheet">
                   <div className="landing-sheet-inner">
                     <div className="landing-sheet-header">
-                      <div className="landing-brand">
-                        <div className="landing-brand-logo">
-                          <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor">
-                            <path d="M12 0C12 7.2 16.8 12 24 12C16.8 12 12 16.8 12 24C12 16.8 7.2 12 0 12C7.2 12 12 7.2 12 0Z" />
-                          </svg>
-                        </div>
+                      <div
+                        className="landing-brand cursor-pointer"
+                        onClick={handleLogoClick}
+                        role="button"
+                        tabIndex={0}
+                        title="Scroll to top"
+                      >
+                        <CircuitMentorLogo size={20} />
                         <span className="landing-brand-name">CircuitMentor</span>
                       </div>
                     </div>
@@ -372,7 +384,7 @@ export default function LandingPage({
                         </button>
                       )}
                       <button type="button" className="landing-nav-cta-white" style={{ width: '100%', justifyContent: 'center' }}
-                        onClick={() => { setMobileMenuOpen(false); handlePrimaryAction(); }}>
+                        onClick={handleGetStarted}>
                         <span>Get started</span>
                         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                           <line x1="5" y1="12" x2="19" y2="12" />
@@ -430,7 +442,7 @@ export default function LandingPage({
           <button
             type="button"
             className="landing-hero-cta-white"
-            onClick={handlePrimaryAction}
+            onClick={handleGetStarted}
           >
             <span>Get started</span>
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
