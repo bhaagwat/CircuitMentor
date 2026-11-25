@@ -55,10 +55,15 @@ CircuitMentor consists of two primary runtime services and a managed database:
 ### C. Web Frontend (Vercel / Cloudflare Pages)
 - **Framework Preset**: Vite
 - **Root Directory**: `apps/web`
-- **Build Command**: `pnpm build`
+- **Build Command**: `npm run build`
 - **Output Directory**: `dist`
 - **Environment Variables**:
-  - `VITE_API_URL`: `https://api.circuitmentor.com` (leave blank if proxied)
+  - Leave `VITE_API_URL` unset so `/v1/*` proxies same-origin via `apps/web/vercel.json`.
+
+### D. Keeping Render Free Tier Warm (Zero Spin-Down)
+Render free web services spin down after 15 minutes of inactivity (750 free instance-hours/month).
+1. **GitHub Actions Keep-Alive (`.github/workflows/keep-alive.yml`)**: Pings `/health` every 10 minutes. Set Repository Variable `RENDER_HEALTH_URL` (Settings → Secrets and variables → Actions → Variables) to `https://<your-render-service>.onrender.com/health` if your URL differs from `https://circuitmentor-api.onrender.com/health`.
+2. **External Monitor (Recommended for 0 queue jitter)**: Add a free 10-minute HTTP monitor on **UptimeRobot** or **cron-job.org** pointing to `https://<your-render-service>.onrender.com/health`, since GitHub Actions `cron` jobs can occasionally be delayed by 5–15 minutes during peak load.
 
 ---
 

@@ -1,0 +1,23 @@
+name: Keep Render API Warm
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+jobs:
+  ping:
+    name: Ping Render /health
+    runs-on: ubuntu-latest
+    steps:
+      - name: Wake / keep Render service warm
+        env:
+          HEALTH_URL: ${{ vars.RENDER_HEALTH_URL || 'https://circuitmentor-api.onrender.com/health' }}
+        run: |
+          echo "Pinging $HEALTH_URL ..."
+          status=$(curl -sS -o /tmp/health.json -w "%{http_code}" --max-time 65 "$HEALTH_URL" || true)
+          echo "HTTP Status: $status"
+          cat /tmp/health.json || true
+          if [ "$status" != "200" ]; then
+            echo "::warning::Health endpoint returned HTTP $status (may still be waking up or RENDER_HEALTH_URL needs to be set in Repo Variables)"
+          fi
