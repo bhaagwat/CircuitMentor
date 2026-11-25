@@ -2,22 +2,23 @@ name: Keep Render API Warm
 
 on:
   schedule:
-    - cron: "*/10 * * * *"
+    - cron: "*/5 * * * *"
   workflow_dispatch:
 
 jobs:
   ping:
-    name: Ping Render /health
+    name: Ping Render /health & /ready
     runs-on: ubuntu-latest
     steps:
-      - name: Wake / keep Render service warm
+      - name: Wake / keep Render service and DB pool warm
         env:
-          HEALTH_URL: ${{ vars.RENDER_HEALTH_URL || 'https://circuitmentor-api.onrender.com/health' }}
+          BASE_URL: ${{ vars.RENDER_URL || 'https://circuitmentor-api.onrender.com' }}
         run: |
-          echo "Pinging $HEALTH_URL ..."
-          status=$(curl -sS -o /tmp/health.json -w "%{http_code}" --max-time 65 "$HEALTH_URL" || true)
-          echo "HTTP Status: $status"
-          cat /tmp/health.json || true
-          if [ "$status" != "200" ]; then
-            echo "::warning::Health endpoint returned HTTP $status (may still be waking up or RENDER_HEALTH_URL needs to be set in Repo Variables)"
+          echo "Pinging $BASE_URL/health and $BASE_URL/ready ..."
+          h_status=$(curl -sS -o /tmp/health.json -w "%{http_code}" --max-time 65 "$BASE_URL/health" || true)
+          r_status=$(curl -sS -o /tmp/ready.json -w "%{http_code}" --max-time 65 "$BASE_URL/ready" || true)
+          echo "/health -> HTTP $h_status: $(cat /tmp/health.json 2>/dev/null || true)"
+          echo "/ready  -> HTTP $r_status: $(cat /tmp/ready.json 2>/dev/null || true)"
+          if [ "$h_status" != "200" ]; then
+            echo "::warning::Health endpoint returned HTTP $h_status (check vars.RENDER_URL)"
           fi
